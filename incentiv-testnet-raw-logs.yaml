@@ -1,0 +1,16 @@
+name: incentiv-testnet-raw-logs
+apiVersion: 3
+sources:
+  incentiv_testnet.raw_logs:
+    dataset_name: incentiv_testnet.raw_logs
+    type: dataset
+    version: 1.0.0
+transforms: {}
+sinks:
+  postgres_incentiv_testnet_raw_logs:
+    type: postgres
+    table: incentiv_testnet_raw_logs
+    schema: public
+    secret_name: INCENTIV_TESTNET_POSTGRES
+    description: 'Postgres sink for: incentiv_testnet.raw_logs'
+    from: incentiv_testnet.raw_logs
