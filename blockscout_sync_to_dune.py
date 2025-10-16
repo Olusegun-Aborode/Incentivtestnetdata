@@ -13,6 +13,7 @@ load_dotenv()
 DUNE_API_KEY = os.getenv('DUNE_API_KEY')
 DUNE_TX_TABLE_NAME = os.getenv('DUNE_TX_TABLE_NAME', 'incentiv_testnet_transactions')
 DUNE_BLOCK_TABLE_NAME = os.getenv('DUNE_BLOCK_TABLE_NAME', 'incentiv_testnet_blocks')
+DUNE_ADDRESS_TABLE_NAME = os.getenv('DUNE_ADDRESS_TABLE_NAME', 'incentiv_testnet_addresses')
 BLOCKSCOUT_BASE = os.getenv('BLOCKSCOUT_API_BASE', 'https://explorer-testnet.incentiv.io/api/v2')
 MAX_HTTP_RETRIES = int(os.getenv('MAX_HTTP_RETRIES', '5'))
 BACKOFF_BASE_SECONDS = float(os.getenv('BACKOFF_BASE_SECONDS', '1'))
@@ -20,6 +21,7 @@ BACKOFF_MAX_SECONDS = float(os.getenv('BACKOFF_MAX_SECONDS', '16'))
 MAX_ITEMS_TRANSACTIONS = int(os.getenv('MAX_ITEMS_TRANSACTIONS', '1000'))
 MAX_ITEMS_BLOCKS = int(os.getenv('MAX_ITEMS_BLOCKS', '500'))
 ITEMS_COUNT_PER_PAGE = int(os.getenv('ITEMS_COUNT_PER_PAGE', '100'))  # Blockscout default page size is 50; we can request more
+ITEMS_COUNT_ADDR = int(os.getenv('ITEMS_COUNT_ADDR', '50'))  # Addresses endpoint is stricter; use 50
 
 
 def http_get_json(endpoint, params=None, timeout=60):
@@ -135,6 +137,19 @@ def map_block_item(item):
     }
 
 
+def map_address_item(item):
+    return {
+        'address': item.get('hash'),
+        'is_contract': item.get('is_contract'),
+        'transactions_count': item.get('transactions_count'),
+        'coin_balance': item.get('coin_balance'),
+        'ens_domain_name': item.get('ens_domain_name'),
+        'name': item.get('name'),
+        'public_tags': ','.join(item.get('public_tags') or []),
+        'ingested_at': datetime.now(timezone.utc).isoformat()
+    }
+
+
 def fetch_recent_transactions(max_items=MAX_ITEMS_TRANSACTIONS):
     items = []
     params = {'items_count': ITEMS_COUNT_PER_PAGE}
@@ -169,15 +184,34 @@ def fetch_recent_blocks(max_items=MAX_ITEMS_BLOCKS):
     return [map_block_item(i) for i in items]
 
 
+def fetch_recent_addresses(max_items=1000):
+    items = []
+    params = {'items_count': ITEMS_COUNT_ADDR}
+    while True:
+        js = http_get_json('/addresses', params=params)
+        page_items = js.get('items') or []
+        items.extend(page_items)
+        next_params = js.get('next_page_params')
+        print(f"Fetched {len(page_items)} address items; total {len(items)}")
+        if len(items) >= max_items or not next_params:
+            break
+        params = next_params
+    items = items[:max_items]
+    return [map_address_item(i) for i in items]
+
+
 if __name__ == '__main__':
     print('Fetching recent Blockscout data...')
     tx_rows = fetch_recent_transactions()
     blk_rows = fetch_recent_blocks()
+    addr_rows = fetch_recent_addresses()
     print(f'Uploading {len(tx_rows)} transactions to Dune table {DUNE_TX_TABLE_NAME}...')
     ok_tx = upload_to_dune(DUNE_TX_TABLE_NAME, tx_rows)
     print(f'Uploading {len(blk_rows)} blocks to Dune table {DUNE_BLOCK_TABLE_NAME}...')
     ok_blk = upload_to_dune(DUNE_BLOCK_TABLE_NAME, blk_rows)
-    if ok_tx and ok_blk:
+    print(f'Uploading {len(addr_rows)} addresses to Dune table {DUNE_ADDRESS_TABLE_NAME}...')
+    ok_addr = upload_to_dune(DUNE_ADDRESS_TABLE_NAME, addr_rows)
+    if ok_tx and ok_blk and ok_addr:
         print('Blockscout raw sync complete.')
     else:
         print('Blockscout raw sync encountered errors.')
