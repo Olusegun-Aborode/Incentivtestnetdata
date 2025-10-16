@@ -1,53 +1,92 @@
-# Goldsky CLI Reference
+# Incentiv Testnet RPC → Dune Sync
 
-This repository contains documentation and examples for using the Goldsky CLI.
+This repository now focuses on directly syncing Incentiv Testnet logs from the JSON-RPC endpoint into a Dune table, without Goldsky/Neon.
 
-## Installation
+## Overview
+- Source: Incentiv Testnet RPC (eth_getLogs)
+- Destination: Dune table (default: incentiv_testnet_raw_logs_rpc)
+- Script: fetch_sync_to_dune.py
+- Checkpointing: last_block.txt to continue from the next block on subsequent runs
+- Reliability: retries with exponential backoff and a small reorg overlap window to avoid missing data
+- Scheduling: hourly system cron job (optional GitHub Actions available)
 
-To install the Goldsky CLI, you can use the following command:
+## Prerequisites
+- Python 3.9+
+- pip install:
+  - requests
+  - python-dotenv
+- .env file in the project root with:
+  - DUNE_API_KEY=<your_dune_api_key>
+  - INCENTIVE_RPC_URL=https://rpc1.testnet.incentiv.io/
+  - Optional tuning:
+    - BLOCK_BATCH_SIZE=100
+    - REORG_OVERLAP_BLOCKS=5
+    - MAX_RPC_RETRIES=5
+    - DUNE_UPLOAD_RETRIES=3
+    - BACKOFF_BASE_SECONDS=1
+    - BACKOFF_MAX_SECONDS=16
+
+## Run a one-off sync
+From the project root:
 
 ```bash
-curl https://goldsky.com | sh
+python3 fetch_sync_to_dune.py
 ```
 
-Note: If the installation requires sudo privileges, you may need to provide your administrator password.
+This will:
+- Read last_block.txt if present and re-fetch the last N blocks (reorg overlap)
+- Pull logs with eth_getLogs for the computed range
+- Upload to Dune as CSV
+- Advance last_block.txt for the next run
 
-## Basic Usage
+## Continuous sync (cron)
+A local cron entry can run the sync hourly and append logs to cron_sync.log.
 
-```bash
-goldsky <cmd> args
+Example entry:
+```
+0 * * * * cd /Users/olusegunaborode/Documents/trae_projects/goldskycli && /usr/bin/env python3 fetch_sync_to_dune.py >> /Users/olusegunaborode/Documents/trae_projects/goldskycli/cron_sync.log 2>&1
 ```
 
-## Available Commands
+Logs: /Users/olusegunaborode/Documents/trae_projects/goldskycli/cron_sync.log
 
-| Command | Description |
-|---------|-------------|
-| `goldsky` | Get started with Goldsky |
-| `goldsky login` | Log in to Goldsky to enable authenticated CLI commands |
-| `goldsky logout` | Log out of Goldsky on this computer |
-| `goldsky subgraph` | Commands related to subgraphs |
-| `goldsky project` | Commands related to project management |
-| `goldsky pipeline` | Commands related to Goldsky pipelines |
-| `goldsky dataset` | Commands related to Goldsky datasets |
-| `goldsky indexed` | Analyze blockchain data with indexed.xyz |
-| `goldsky secret` | Commands related to secret management |
-| `goldsky telemetry` | Commands related to CLI telemetry |
+If you prefer GitHub Actions instead of local cron, we can set up a workflow that uses repository secrets and runs on a schedule.
 
-## Options
+## Dune query: de-duplicate (reorg-safe)
+Use a window function to keep one row per (block_number, transaction_hash, log_index):
 
-| Option | Description | Type | Default |
-|--------|-------------|------|---------|
-| `--token` | CLI Auth Token | string | "" |
-| `--color` | Colorize output | boolean | true |
-| `-v, --version` | Show version number | boolean | |
-| `-h, --help` | Show help | boolean | |
+```sql
+WITH ranked AS (
+  SELECT
+    block_number,
+    block_hash,
+    transaction_hash,
+    log_index,
+    address,
+    data,
+    topics,
+    row_number() OVER (
+      PARTITION BY block_number, transaction_hash, log_index
+      ORDER BY block_hash DESC
+    ) AS rn
+  FROM incentiv_testnet_raw_logs_rpc
+)
+SELECT
+  block_number,
+  block_hash,
+  transaction_hash,
+  log_index,
+  address,
+  data,
+  topics
+FROM ranked
+WHERE rn = 1;
+```
 
-## Getting Started
+Tip: If you want stronger ordering, add an ingested_at timestamp in uploads and ORDER BY ingested_at DESC instead.
 
-To get started with Goldsky, follow these steps:
+## Repo hygiene
+- .env is ignored (do not commit secrets)
+- last_block.txt and cron_sync.log are ignored (ephemeral state/logs)
 
-1. Install the Goldsky CLI
-2. Log in to your Goldsky account: `goldsky login`
-3. Create or manage your projects: `goldsky project`
-
-For more detailed information, check the examples directory in this repository.
+## Legacy (Goldsky/Neon)
+The previous Goldsky/Neon pipeline is retired for this repo. Legacy examples remain under examples/ and historical files like incentiv-testnet-raw-logs.yaml and sync_neon_to_dune.py are kept for reference only.
