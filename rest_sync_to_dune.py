@@ -4,7 +4,7 @@ import csv
 import json
 import time
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
 
@@ -169,7 +169,7 @@ def aggregate_metrics(start_block, end_block):
         'total_unique_addresses': active_users,
         'daily_average_gas_price_wei': avg_gas_price_wei,
         'total_fee_wei': total_fee_wei,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }
 
     return [metrics_row]
