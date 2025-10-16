@@ -1,2 +1,4 @@
 # Environment secrets
 .env
+last_block.txt
+cron_sync.log
