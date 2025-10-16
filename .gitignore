@@ -1,6 +1,7 @@
 # Environment secrets
 .env
-last_block.txt
-cron_sync.log
+# Blockscout sync artifacts
+last_blockscout_block.txt
+cron_blockscout_sync.log
 last_metrics_block.txt
 cron_rest_sync.log
