@@ -22,6 +22,7 @@ MAX_ITEMS_TRANSACTIONS = int(os.getenv('MAX_ITEMS_TRANSACTIONS', '1000'))
 MAX_ITEMS_BLOCKS = int(os.getenv('MAX_ITEMS_BLOCKS', '500'))
 ITEMS_COUNT_PER_PAGE = int(os.getenv('ITEMS_COUNT_PER_PAGE', '100'))  # Blockscout default page size is 50; we can request more
 ITEMS_COUNT_ADDR = int(os.getenv('ITEMS_COUNT_ADDR', '50'))  # Addresses endpoint is stricter; use 50
+LAST_BLOCKSCOUT_FILE = os.getenv('LAST_BLOCKSCOUT_FILE', 'last_blockscout_block.txt')
 
 
 def http_get_json(endpoint, params=None, timeout=60):
@@ -200,17 +201,56 @@ def fetch_recent_addresses(max_items=1000):
     return [map_address_item(i) for i in items]
 
 
+def read_last_ingested_block():
+    try:
+        with open(LAST_BLOCKSCOUT_FILE, 'r') as f:
+            return int(f.read().strip())
+    except Exception:
+        return 0
+
+
+def save_last_ingested_block(height: int):
+    try:
+        with open(LAST_BLOCKSCOUT_FILE, 'w') as f:
+            f.write(str(int(height)))
+    except Exception as e:
+        print('Warning: failed to persist last ingested block:', e)
+
+
 if __name__ == '__main__':
     print('Fetching recent Blockscout data...')
-    tx_rows = fetch_recent_transactions()
-    blk_rows = fetch_recent_blocks()
+    last_height = read_last_ingested_block()
+    tx_rows_all = fetch_recent_transactions()
+    blk_rows_all = fetch_recent_blocks()
     addr_rows = fetch_recent_addresses()
+
+    # Incremental filtering by block height
+    def safe_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return None
+
+    tx_rows = [r for r in tx_rows_all if safe_int(r.get('block_number')) is not None and safe_int(r.get('block_number')) > last_height]
+    blk_rows = [r for r in blk_rows_all if safe_int(r.get('height')) is not None and safe_int(r.get('height')) > last_height]
+
+    print(f'Last ingested block height: {last_height}. New tx rows: {len(tx_rows)}; new block rows: {len(blk_rows)}')
+
     print(f'Uploading {len(tx_rows)} transactions to Dune table {DUNE_TX_TABLE_NAME}...')
     ok_tx = upload_to_dune(DUNE_TX_TABLE_NAME, tx_rows)
     print(f'Uploading {len(blk_rows)} blocks to Dune table {DUNE_BLOCK_TABLE_NAME}...')
     ok_blk = upload_to_dune(DUNE_BLOCK_TABLE_NAME, blk_rows)
     print(f'Uploading {len(addr_rows)} addresses to Dune table {DUNE_ADDRESS_TABLE_NAME}...')
     ok_addr = upload_to_dune(DUNE_ADDRESS_TABLE_NAME, addr_rows)
+
+    # Update last ingested height if tx or blocks uploaded successfully
+    if (ok_tx and tx_rows) or (ok_blk and blk_rows):
+        max_tx_height = max([safe_int(r.get('block_number')) or 0 for r in tx_rows_all], default=0)
+        max_blk_height = max([safe_int(r.get('height')) or 0 for r in blk_rows_all], default=0)
+        new_height = max(last_height, max_tx_height, max_blk_height)
+        save_last_ingested_block(new_height)
+        print('Updated last ingested block height to:', new_height)
+
     if ok_tx and ok_blk and ok_addr:
         print('Blockscout raw sync complete.')
     else:
