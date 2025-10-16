@@ -1,6 +1,6 @@
 # Incentiv Testnet RPC → Dune Sync
 
-This repository now focuses on directly syncing Incentiv Testnet logs from the JSON-RPC endpoint into a Dune table, without Goldsky/Neon.
+This repository now focuses on directly syncing Incentiv Testnet logs from the JSON-RPC endpoint into a Dune table.
 
 ## Overview
 - Source: Incentiv Testnet RPC (eth_getLogs)
