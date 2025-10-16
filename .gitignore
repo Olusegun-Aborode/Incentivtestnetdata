@@ -2,3 +2,5 @@
 .env
 last_block.txt
 cron_sync.log
+last_metrics_block.txt
+cron_rest_sync.log
