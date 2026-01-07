@@ -12,8 +12,9 @@ from src.extractors.blockscout import BlockscoutExtractor
 from src.handlers.dlq import DeadLetterQueue
 from src.loaders.dune import DuneLoader
 from src.transformers.logs import normalize_logs
-from src.extractors.blocks import normalize_blocks
-from src.extractors.transactions import normalize_transactions
+from src.transformers.blocks import normalize_blocks
+from src.transformers.transactions import normalize_transactions
+from src.extractors.transactions import TransactionsExtractor
 
 
 def load_state(path: Path) -> Dict[str, int]:
@@ -132,6 +133,8 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
     
     print(f"Chain Extraction range: {start_block} to {safe_block}")
 
+    tx_extractor = TransactionsExtractor(extractor)
+
     for start in range(start_block, safe_block + 1, batch_size):
         end = min(start + batch_size - 1, safe_block)
         try:
@@ -159,7 +162,20 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
 
             # Process Transactions
             if args.transactions:
-                df_txs = normalize_transactions(blocks, chain=args.chain)
+                tx_hashes = [
+                    tx["hash"]
+                    for block in blocks
+                    if isinstance(block.get("transactions"), list)
+                    for tx in block["transactions"]
+                    if isinstance(tx, dict) and "hash" in tx
+                ]
+                
+                receipts_by_hash = {}
+                if tx_hashes:
+                    print(f"  Fetching {len(tx_hashes)} receipts...")
+                    receipts_by_hash = tx_extractor.get_transaction_receipts(tx_hashes)
+
+                df_txs = normalize_transactions(blocks, chain=args.chain, receipts_by_hash=receipts_by_hash)
                 if args.dry_run:
                     print(f"Txs {start}-{end} -> {len(df_txs)} records")
                 else:
