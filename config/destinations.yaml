@@ -1,7 +1,8 @@
 dune:
   api_key: ${DUNE_API_KEY}
+  namespace: surgence_lab
   base_url: https://api.dune.com/api/v1
   tables:
-    logs: incentiv_logs
-    blocks: incentiv_blocks
-    transactions: incentiv_transactions
+    logs: incentiv_logs_v2
+    blocks: incentiv_blocks_v2
+    transactions: incentiv_transactions_v2

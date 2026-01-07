@@ -83,6 +83,7 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
         for contract_name, address in contracts.items():
             for topic_name, topic in topics.items():
                 try:
+                    print(f"  Scanning {contract_name}:{topic_name} in {start}-{end}...")
                     logs = extractor.get_logs(address, [topic], start, end)
                     if not logs:
                         continue
@@ -211,7 +212,11 @@ def main() -> None:
         rate_limit_per_second=float(chain_config["rate_limit_per_second"]),
     )
 
-    dune_loader = DuneLoader(api_key=dune_cfg["api_key"], base_url=dune_cfg["base_url"])
+    dune_loader = DuneLoader(
+        api_key=dune_cfg["api_key"], 
+        base_url=dune_cfg["base_url"],
+        namespace=dune_cfg.get("namespace", "surgence_lab")
+    )
 
     state_path = Path(args.state_file)
     state = load_state(state_path)

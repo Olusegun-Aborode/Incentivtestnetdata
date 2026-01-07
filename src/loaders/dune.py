@@ -8,15 +8,55 @@ import requests
 
 
 class DuneLoader:
-    def __init__(self, api_key: str, base_url: str) -> None:
+    def __init__(self, api_key: str, base_url: str, namespace: str = "surgence_lab") -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.namespace = namespace
         self.session = requests.Session()
-        # Dune API headers - try to be broad to match various API versions
         self.session.headers.update({
             "X-DUNE-API-KEY": api_key,
-            "Accept-Encoding": "identity" # Avoid gzip decoding issues
+            "Accept-Encoding": "identity" 
         })
+
+    def _map_type(self, col_name: str, dtype: Any) -> str:
+        s_dtype = str(dtype).lower()
+        if "datetime" in s_dtype or "timestamp" in col_name.lower():
+            return "timestamp"
+        if "int64" in s_dtype:
+            return "integer"
+        if "float" in s_dtype or "double" in s_dtype:
+            return "double"
+        if "bool" in s_dtype:
+            return "boolean"
+        return "varchar"
+
+    def _create_table(self, table_name: str, df: pd.DataFrame, description: str) -> None:
+        """Create table using the schema-based /uploads API."""
+        print(f"  ✨ Creating schema-based table {table_name}...")
+        
+        schema = []
+        for col in df.columns:
+            schema.append({
+                "name": col,
+                "type": self._map_type(col, df[col].dtype)
+            })
+            
+        url = f"{self.base_url}/uploads"
+        payload = {
+            "namespace": self.namespace,
+            "table_name": table_name,
+            "description": description,
+            "schema": schema,
+            "is_private": False
+        }
+        
+        resp = self.session.post(url, json=payload, timeout=60)
+        if resp.status_code == 409:
+             print(f"  ℹ️ Table already exists (409).")
+        elif resp.status_code >= 400:
+             print(f"  ❌ Failed to create table: {resp.text}")
+        else:
+             print(f"  ✅ Table created successfully.")
 
     def upload_dataframe(
         self,
@@ -29,7 +69,7 @@ class DuneLoader:
             return {"status": "empty"}
 
         df = df.copy()
-        # Format datetimes for Dune (ISO 8601)
+        # Convert datetimes to ISO strings for CSV
         for column in df.columns:
             if pd.api.types.is_datetime64_any_dtype(df[column]):
                 df[column] = df[column].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -37,47 +77,46 @@ class DuneLoader:
         if dedupe_columns:
             df = df.drop_duplicates(subset=dedupe_columns)
 
-        # Smaller chunks for reliability
-        chunk_size = 1000
-        total_rows = len(df)
         results = {"status": "completed", "rows_uploaded": 0}
-
-        for start in range(0, total_rows, chunk_size):
-            chunk = df.iloc[start : start + chunk_size]
-            csv_content = chunk.to_csv(index=False)
-            
-            # Using the JSON-based /uploads/csv endpoint which is known to work in manual scripts
-            url = f"{self.base_url}/uploads/csv"
-            payload = {
-                "data": csv_content,
-                "table_name": table_name,
-                "description": description or f"Incentiv {table_name} data",
-                "is_private": False
-            }
-            
-            # Local retry for Dune upload
-            import time
-            last_exc = None
-            for attempt in range(5): # More retries for flaky connections
-                try:
-                    # Note: We use json=payload to send as application/json
-                    response = self.session.post(url, json=payload, timeout=120)
-                    
-                    if response.status_code >= 400:
-                        print(f"Dune API Error ({response.status_code}): {response.text}")
-                        if response.status_code == 400:
-                             print(f"CSV Sample: {csv_content[:200]}")
-                    
-                    response.raise_for_status()
-                    break
-                except Exception as e:
-                    last_exc = e
-                    # Exponential backoff
-                    delay = (attempt + 1) * 2
-                    time.sleep(delay)
-            else:
-                raise RuntimeError(f"Dune upload failed after retries: {last_exc}")
+        
+        # Insert endpoint
+        url = f"{self.base_url}/table/{self.namespace}/{table_name}/insert"
+        csv_content = df.to_csv(index=False)
+        
+        import time
+        for attempt in range(2):
+            try:
+                response = self.session.post(
+                    url, 
+                    data=csv_content, 
+                    headers={"Content-Type": "text/csv"},
+                    timeout=120
+                )
                 
-            results["rows_uploaded"] += len(chunk)
+                # If 404/400 might mean table doesn't exist or is legacy
+                if response.status_code in [404, 400]:
+                    txt = response.text.lower()
+                    if "not found" in txt or "csv upload" in txt or response.status_code == 404:
+                        print(f"  ⚠️ Table {table_name} issue: {response.status_code}. Attempting repair/create...")
+                        self._create_table(table_name, df, description)
+                        time.sleep(2) # Wait for propagation
+                        # Retry
+                        response = self.session.post(
+                            url, 
+                            data=csv_content, 
+                            headers={"Content-Type": "text/csv"},
+                            timeout=120
+                        )
 
-        return results
+                if response.status_code >= 400:
+                    print(f"Dune API Error ({response.status_code}): {response.text}")
+                
+                response.raise_for_status()
+                results["rows_uploaded"] = len(df)
+                print(f"  ✅ Successfully uploaded {len(df)} rows to {table_name}")
+                return results
+            except Exception as e:
+                print(f"  ⚠️ Dune insert attempt {attempt+1} failed: {e}")
+                time.sleep(2)
+        
+        raise RuntimeError(f"Dune insert failed for {table_name}")
