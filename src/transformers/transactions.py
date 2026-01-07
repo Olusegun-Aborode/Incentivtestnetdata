@@ -68,5 +68,8 @@ def normalize_transactions(
                 }
             )
             
+    if not rows:
+        return pd.DataFrame(columns=TRANSACTION_SCHEMA.columns.keys())
+        
     df = pd.DataFrame(rows)
     return TRANSACTION_SCHEMA.validate(df)

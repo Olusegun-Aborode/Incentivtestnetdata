@@ -11,7 +11,7 @@ class TransactionsExtractor:
         blocks_map = self.blockscout.get_blocks_by_number(block_numbers, include_transactions=True)
         return [blocks_map[number] for number in block_numbers if number in blocks_map]
 
-    def get_transaction_receipts(self, tx_hashes: Iterable[str], batch_size: int = 50) -> Dict[str, Dict[str, Any]]:
+    def get_transaction_receipts(self, tx_hashes: Iterable[str], batch_size: int = 1) -> Dict[str, Dict[str, Any]]:
         tx_hashes_list = list(tx_hashes)
         receipts: Dict[str, Dict[str, Any]] = {}
         for start in range(0, len(tx_hashes_list), batch_size):

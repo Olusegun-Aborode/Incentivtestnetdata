@@ -128,8 +128,8 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
         print("No new blocks to process (Chain).")
         return
 
-    # Use minimal batch size for full blocks/txs due to server payload limits
-    batch_size = 1 
+    # Increase batch size for blocks (metadata), keep receipts small separately
+    batch_size = 10 
     
     print(f"Chain Extraction range: {start_block} to {safe_block}")
 

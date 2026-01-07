@@ -60,5 +60,8 @@ def normalize_blocks(blocks: List[Dict[str, Any]], chain: str) -> pd.DataFrame:
                 "extracted_at": extracted_at,
             }
         )
+    if not rows:
+        return pd.DataFrame(columns=BLOCK_SCHEMA.columns.keys())
+
     df = pd.DataFrame(rows)
     return BLOCK_SCHEMA.validate(df)
