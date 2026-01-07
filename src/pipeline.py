@@ -12,8 +12,8 @@ from src.extractors.blockscout import BlockscoutExtractor
 from src.handlers.dlq import DeadLetterQueue
 from src.loaders.dune import DuneLoader
 from src.transformers.logs import normalize_logs
-from src.transformers.blocks import normalize_blocks
-from src.transformers.transactions import normalize_transactions
+from src.extractors.blocks import normalize_blocks
+from src.extractors.transactions import normalize_transactions
 
 
 def load_state(path: Path) -> Dict[str, int]:
