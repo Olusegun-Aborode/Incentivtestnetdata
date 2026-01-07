@@ -5,3 +5,17 @@ last_blockscout_block.txt
 cron_blockscout_sync.log
 last_metrics_block.txt
 cron_rest_sync.log
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# System artifacts
+.DS_Store
+
+# Data and logs
+incentiv_data/
+*.csv
+*.json
+*.log
+*.txt
