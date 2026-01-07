@@ -1,2 +1,4 @@
+pandas
+pandera
+PyYAML
 requests
-python-dotenv

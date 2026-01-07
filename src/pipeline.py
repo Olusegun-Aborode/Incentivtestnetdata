@@ -1,157 +1,128 @@
 import argparse
-import os
-from dotenv import load_dotenv
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List
 
-# Load env vars
+from dotenv import load_dotenv
 load_dotenv()
 
-from src.extractors.blockscout import BlockscoutAPI, IncentivETL
-from src.loaders.dune import DuneClient
+from src.config import load_yaml
+from src.extractors.blockscout import BlockscoutExtractor
+from src.handlers.dlq import DeadLetterQueue
+from src.loaders.dune import DuneLoader
+from src.transformers.logs import normalize_logs
 
-# Configurations
-# Using getenv with defaults or hardcoded fallbacks as per original script
-DUNE_API_KEY = os.getenv("DUNE_API_KEY", "3nKpTZrrziBToMPOY7z2nybU8c6L3Our")
-BLOCKSCOUT_URL = os.getenv("INCENTIV_BLOCKSCOUT_URL", "https://explorer.incentiv.io")
-DEX_POOL = "0xf9884c2A1749b0a02ce780aDE437cBaDFA3a961D"
 
-# Hardcoded tokens
-BRIDGED_TOKENS = {
-    "USDC": "0x16e43840d8D79896A389a3De85aB0B0210C05685",
-    "USDT": "0x39b076b5d23F588690D480af3Bf820edad31a4bB",
-    "WETH": "0x3e425317dB7BaC8077093117081b40d9b46F29cb",
-    "SOL": "0xfaC24134dbc4b00Ee11114eCDFE6397f389203E3",
-    "WBTC": "0x0292593D416Cb765E0e8FF77b32fA7e465958FEE",
-}
+def load_state(path: Path) -> Dict[str, int]:
+    if path.exists():
+        return json.loads(path.read_text())
+    return {}
 
-BRIDGED_DECIMALS = {
-    "USDC": 6,
-    "USDT": 6,
-    "WETH": 18,
-    "SOL": 9,
-    "WBTC": 8,
-}
 
-TOKENS = {}
-DECIMALS = {}
+def save_state(path: Path, state: Dict[str, int]) -> None:
+    path.write_text(json.dumps(state))
 
-def main():
-    global TOKENS, DECIMALS
-    
-    parser = argparse.ArgumentParser(description="Incentiv ETL → Dune")
-    parser.add_argument("--full", action="store_true", help="Full extraction (use --pages to limit)")
-    parser.add_argument("--incremental", action="store_true", help="Last 10 pages only")
-    parser.add_argument("--test", action="store_true", help="Small sample (2 pages)")
-    parser.add_argument("--pages", type=int, default=100, help="Max pages per run (default: 100)")
-    parser.add_argument("--local-only", action="store_true", help="Save to CSV only, skip Dune upload")
-    parser.add_argument("--bridge-only", action="store_true", help="Only extract bridge transfers")
-    parser.add_argument("--transactions", action="store_true", help="Extract all transactions to fix wallet counts")
-    parser.add_argument("--dry-run", action="store_true", help="Dry run: print counts but do not upload")
-    
-    # Add from-block/to-block arguments as requested by user
-    parser.add_argument("--from-block", type=str, default="0", help="Start block")
-    parser.add_argument("--to-block", type=str, default="latest", help="End block")
 
-    args = parser.parse_args()
-    
-    if args.test:
-        max_pages = 2
-        print("🧪 TEST MODE (2 pages)")
-    elif args.incremental:
-        max_pages = 10
-        print("⏱️ INCREMENTAL MODE (10 pages)")
-    elif args.full:
-        max_pages = None
-        print("🚀 FULL EXTRACTION MODE (Unlimited pages)")
-    else:
-        max_pages = args.pages
-        print(f"📊 EXTRACTION MODE ({max_pages} pages max)")
-    
-    # Initialize clients
-    blockscout = BlockscoutAPI(BLOCKSCOUT_URL)
-    dune = DuneClient(DUNE_API_KEY)
-    
-    # Fetch tokens dynamically
-    print("\n🪙 Fetching token list...")
-    
-    # Start with hardcoded bridged tokens
-    TOKENS.update(BRIDGED_TOKENS)
-    DECIMALS.update(BRIDGED_DECIMALS)
-    print(f"  📌 Added {len(BRIDGED_TOKENS)} bridged tokens (USDC, USDT, WETH, SOL, WBTC)")
-    
-    # Add dynamic tokens from API
-    token_list = blockscout.get_tokens()
-    for t in token_list:
-        symbol = t.get("symbol", "UNKNOWN")
-        address = t.get("address_hash", "")
-        decimals = int(t.get("decimals", "18") or "18")
-        if symbol not in TOKENS:  # Don't override bridged tokens
-            TOKENS[symbol] = address
-            DECIMALS[symbol] = decimals
-            print(f"  • {symbol}: {address[:10]}... ({decimals} decimals)")
-    
-    print(f"  ✅ Found {len(TOKENS)} tokens")
-    
-    etl = IncentivETL(blockscout, dune)
-    etl.set_config(TOKENS, DECIMALS, DEX_POOL)
-    
-    # Get chain stats
-    print("\n📈 Chain Statistics...")
-    stats = blockscout.get_stats()
-    print(f"  Blocks: {stats.get('total_blocks', 'N/A')}")
-    print(f"  Transactions: {stats.get('total_transactions', 'N/A')}")
-    print(f"  Addresses: {stats.get('total_addresses', 'N/A')}")
-    
-    # Extract data
-    bridge_transfers = etl.extract_bridge_transfers(max_pages)
-    
-    if args.bridge_only:
-        token_transfers = []
-        dex_swaps = []
-        active_wallets = [] 
-    else:
-        token_transfers = etl.extract_token_transfers(max_pages)
-        dex_swaps = etl.extract_dex_swaps(max_pages)
-        if args.transactions or args.full:
-             etl.extract_transactions(max_pages)
-    
-    # Populate timestamps per fetched items (logic moved to IncentivETL)
-    etl.populate_timestamps(bridge_transfers, dex_swaps)
-    
-    if not args.bridge_only:
-        etl.include_known_contracts(TOKENS, DEX_POOL)
-        active_wallets = etl.get_wallets()
-    else:
-        active_wallets = [] 
-    
-    # Summary
-    print(f"""
-╔══════════════════════════════════════════════════════════════╗
-║                 ETL SUMMARY                                  ║
-╠══════════════════════════════════════════════════════════════╣
-║  Bridge Transfers:  {len(bridge_transfers):>8}                              ║
-║  Token Transfers:   {len(token_transfers):>8}                              ║
-║  DEX Swaps:         {len(dex_swaps):>8}                              ║
-║  Active Wallets:    {len(active_wallets):>8}                              ║
-║  Tokens Tracked:    {len(TOKENS):>8}                              ║
-╚══════════════════════════════════════════════════════════════╝
-    """)
-    
-    if args.dry_run:
-        print("\n🧪 DRY RUN COMPLETE - No data uploaded to Dune.")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Incentiv Blockscout ETL")
+    parser.add_argument("--chain", default="incentiv")
+    parser.add_argument("--from-block", type=int, default=None)
+    parser.add_argument("--to-block", type=int, default=None)
+    parser.add_argument("--state-file", default="state.json")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args()
+
+
+def enrich_logs_with_timestamps(logs: List[Dict], blocks: Dict[int, Dict]) -> None:
+    for log in logs:
+        block_number = int(log["blockNumber"], 16)
+        block = blocks.get(block_number)
+        if not block:
+            log["block_timestamp"] = datetime.utcfromtimestamp(0)
+            continue
+        log["block_timestamp"] = datetime.utcfromtimestamp(int(block["timestamp"], 16))
+
+
+def run_logs_etl(args: argparse.Namespace) -> None:
+    chains = load_yaml("config/chains.yaml")
+    events = load_yaml("config/events.yaml")
+    destinations = load_yaml("config/destinations.yaml")
+
+    chain_config = chains[args.chain]
+    event_config = events[args.chain]
+
+    extractor = BlockscoutExtractor(
+        base_url=chain_config["blockscout_base_url"],
+        rpc_url=chain_config["blockscout_rpc_url"],
+        confirmations=int(chain_config["confirmations"]),
+        batch_size=int(chain_config["batch_size"]),
+        rate_limit_per_second=float(chain_config["rate_limit_per_second"]),
+    )
+
+    dune_cfg = destinations["dune"]
+    dune_loader = DuneLoader(api_key=dune_cfg["api_key"], base_url=dune_cfg["base_url"])
+    table_name = dune_cfg["tables"]["logs"]
+
+    state_path = Path(args.state_file)
+    state = load_state(state_path)
+    last_block = state.get("last_block", 0)
+
+    safe_block = args.to_block if args.to_block is not None else extractor.get_safe_block_number()
+    start_block = args.from_block if args.from_block is not None else last_block + 1
+
+    if start_block > safe_block:
+        print("No new blocks to process.")
         return
 
-    # Push to Dune
-    if not args.local_only:
-        etl.push_to_dune(bridge_transfers, token_transfers, dex_swaps, active_wallets)
-    else:
-        # Save local logic if needed, or rely on DuneClient's built-in backup
-        # DuneClient saves backup in _upload_csv anyway, so we just skip the upload part?
-        # My DuneClient implementation uploads AND saves.
-        # Let's verify DuneClient usage.
-        # If local-only, we shouldn't call push_to_dune if it uploads.
-        # We need a save_local method or push_to_dune should handle it.
-        # I'll modify push_to_dune to check arg? No, better to stick to provided logic structure.
-        pass
+    dlq = DeadLetterQueue()
+
+    contracts = {k: v.lower() for k, v in event_config["contracts"].items() if v}
+    topics = {k: v.lower() for k, v in event_config["topics"].items() if v}
+
+    if not topics:
+        raise RuntimeError("Missing topics in config/events.yaml")
+
+    for start in range(start_block, safe_block + 1, extractor.batch_size):
+        end = min(start + extractor.batch_size - 1, safe_block)
+        for contract_name, address in contracts.items():
+            for topic_name, topic in topics.items():
+                try:
+                    logs = extractor.get_logs(address, [topic], start, end)
+                    if not logs:
+                        continue
+                    block_numbers = [int(log["blockNumber"], 16) for log in logs]
+                    blocks = extractor.get_blocks_by_number(block_numbers)
+                    enrich_logs_with_timestamps(logs, blocks)
+                    df = normalize_logs(logs, chain=args.chain)
+                    if args.dry_run:
+                        print(
+                            f"{contract_name}:{topic_name} {start}-{end} -> {len(df)} logs"
+                        )
+                    else:
+                        dune_loader.upload_dataframe(
+                            table_name=table_name,
+                            df=df,
+                            description=f"{args.chain} logs from Blockscout",
+                            dedupe_columns=["block_number", "tx_hash", "log_index"],
+                        )
+                except Exception as exc:
+                    dlq.send(
+                        record={"contract": contract_name, "topic": topic_name},
+                        error=exc,
+                        context={"from_block": start, "to_block": end},
+                    )
+        state["last_block"] = end
+        save_state(state_path, state)
+
+
+def main() -> None:
+    args = parse_args()
+    try:
+        run_logs_etl(args)
+    except Exception as e:
+        print(f"Pipeline failed: {e}")
+        exit(1)
 
 
 if __name__ == "__main__":

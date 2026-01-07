@@ -1,0 +1,5 @@
+dune:
+  api_key: ${DUNE_API_KEY}
+  base_url: https://api.dune.com/api/v1
+  tables:
+    logs: incentiv_logs

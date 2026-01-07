@@ -17,5 +17,7 @@ __pycache__/
 incentiv_data/
 *.csv
 *.json
+!schemas/*.json
 *.log
 *.txt
+!requirements.txt
