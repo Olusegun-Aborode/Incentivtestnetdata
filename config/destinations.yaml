@@ -3,3 +3,5 @@ dune:
   base_url: https://api.dune.com/api/v1
   tables:
     logs: incentiv_logs
+    blocks: incentiv_blocks
+    transactions: incentiv_transactions

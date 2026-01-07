@@ -57,7 +57,9 @@ class BlockscoutExtractor:
             logs.extend(response.get("result", []))
         return logs
 
-    def get_blocks_by_number(self, block_numbers: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+    def get_blocks_by_number(
+        self, block_numbers: Iterable[int], include_transactions: bool = False
+    ) -> Dict[int, Dict[str, Any]]:
         unique_numbers = sorted(set(block_numbers))
         results: Dict[int, Dict[str, Any]] = {}
         chunk_size = 100
@@ -69,7 +71,7 @@ class BlockscoutExtractor:
                     "id": block_number,
                     "jsonrpc": "2.0",
                     "method": "eth_getBlockByNumber",
-                    "params": [hex(block_number), False],
+                    "params": [hex(block_number), include_transactions],
                 }
                 for block_number in chunk
             ]
