@@ -62,7 +62,7 @@ class BlockscoutExtractor:
     ) -> Dict[int, Dict[str, Any]]:
         unique_numbers = sorted(set(block_numbers))
         results: Dict[int, Dict[str, Any]] = {}
-        chunk_size = 100
+        chunk_size = 1 if include_transactions else 100
 
         for i in range(0, len(unique_numbers), chunk_size):
             chunk = unique_numbers[i : i + chunk_size]
