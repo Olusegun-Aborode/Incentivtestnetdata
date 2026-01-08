@@ -37,7 +37,15 @@ class BlockscoutExtractor:
     ) -> List[Dict[str, Any]]:
         logs: List[Dict[str, Any]] = []
         address = address.lower()
-        topics = [topic.lower() for topic in topics]
+        normalized_topics = []
+        for t in topics:
+            if isinstance(t, str):
+                normalized_topics.append(t.lower())
+            elif isinstance(t, list):
+                normalized_topics.append([x.lower() for x in t])
+            else:
+                normalized_topics.append(t)
+        topics = normalized_topics
         for start in range(from_block, to_block + 1, self.batch_size):
             end = min(start + self.batch_size - 1, to_block)
             payload = {
@@ -62,7 +70,7 @@ class BlockscoutExtractor:
     ) -> Dict[int, Dict[str, Any]]:
         unique_numbers = sorted(set(block_numbers))
         results: Dict[int, Dict[str, Any]] = {}
-        chunk_size = 1 if include_transactions else 100
+        chunk_size = 1 if include_transactions else 10
 
         for i in range(0, len(unique_numbers), chunk_size):
             chunk = unique_numbers[i : i + chunk_size]

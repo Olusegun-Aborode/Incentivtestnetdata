@@ -2,7 +2,7 @@ incentiv:
   chain_id: 0
   name: incentiv
   confirmations: 12
-  batch_size: 1000
+  batch_size: 100
   rate_limit_per_second: 10
   blockscout_base_url: ${INCENTIV_BLOCKSCOUT_URL}
   blockscout_rpc_url: ${INCENTIV_BLOCKSCOUT_RPC_URL}

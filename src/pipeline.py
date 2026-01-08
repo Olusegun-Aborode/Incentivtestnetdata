@@ -81,31 +81,41 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
     for start in range(start_block, safe_block + 1, extractor.batch_size):
         end = min(start + extractor.batch_size - 1, safe_block)
         for contract_name, address in contracts.items():
-            for topic_name, topic in topics.items():
-                try:
-                    print(f"  Scanning {contract_name}:{topic_name} in {start}-{end}...")
-                    logs = extractor.get_logs(address, [topic], start, end)
-                    if not logs:
-                        continue
-                    block_numbers = [int(log["blockNumber"], 16) for log in logs]
-                    blocks = extractor.get_blocks_by_number(block_numbers)
-                    enrich_logs_with_timestamps(logs, blocks)
-                    df = normalize_logs(logs, chain=args.chain)
-                    if args.dry_run:
-                        print(f"{contract_name}:{topic_name} {start}-{end} -> {len(df)} logs")
-                    else:
-                        dune_loader.upload_dataframe(
-                            table_name=table_name,
-                            df=df,
-                            description=f"{args.chain} logs from Blockscout",
-                            dedupe_columns=["block_number", "tx_hash", "log_index"],
-                        )
-                except Exception as exc:
-                    dlq.send(
-                        record={"contract": contract_name, "topic": topic_name},
-                        error=exc,
-                        context={"from_block": start, "to_block": end},
+            try:
+                topic_list = list(topics.values())
+                print(f"  Scanning {contract_name} for {len(topic_list)} topics in {start}-{end}...")
+                logs = extractor.get_logs(address, [topic_list], start, end)
+                if not logs:
+                    continue
+                
+                print(f"  🔥 Found {len(logs)} logs for {contract_name}!")
+                block_numbers = sorted(list(set([int(log["blockNumber"], 16) for log in logs])))
+                print(f"  Fetching {len(block_numbers)} blocks for timestamps...")
+                blocks = extractor.get_blocks_by_number(block_numbers)
+                
+                print(f"  Enriching logs...")
+                enrich_logs_with_timestamps(logs, blocks)
+                
+                print(f"  Normalizing logs into DataFrame...")
+                df = normalize_logs(logs, chain=args.chain)
+                
+                print(f"  Uploading {len(df)} logs to Dune table {table_name}...")
+                if args.dry_run:
+                    print(f"  [DRY RUN] {contract_name} -> {len(df)} logs")
+                else:
+                    dune_loader.upload_dataframe(
+                        table_name=table_name,
+                        df=df,
+                        description=f"{args.chain} logs from Blockscout",
+                        dedupe_columns=["block_number", "tx_hash", "log_index"],
                     )
+                print(f"  ✅ Log processing complete for {contract_name}.")
+            except Exception as exc:
+                dlq.send(
+                    record={"contract": contract_name, "topics": list(topics.keys())},
+                    error=exc,
+                    context={"from_block": start, "to_block": end},
+                )
         state["last_block"] = end
         save_state(state_path, state)
 
