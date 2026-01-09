@@ -111,11 +111,16 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
                     )
                 print(f"  ✅ Log processing complete for {contract_name}.")
             except Exception as exc:
+                print(f"  ❌ Failed to process logs for {contract_name}: {exc}")
                 dlq.send(
                     record={"contract": contract_name, "topics": list(topics.keys())},
                     error=exc,
                     context={"from_block": start, "to_block": end},
                 )
+                if not args.dry_run:
+                    print(f"  ⚠️ Aborting batch {start}-{end} due to failure. State will NOT advance.")
+                    return # Stop the entire run so we don't skip this block
+
         state["last_block"] = end
         save_state(state_path, state)
 

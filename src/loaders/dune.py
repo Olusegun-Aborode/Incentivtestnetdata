@@ -84,7 +84,7 @@ class DuneLoader:
         csv_content = df.to_csv(index=False)
         
         import time
-        for attempt in range(2):
+        for attempt in range(5):
             try:
                 response = self.session.post(
                     url, 

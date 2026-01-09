@@ -15,23 +15,15 @@ def main():
             start_time = datetime.now()
             print(f"\n[sync] Starting run at {start_time.strftime('%Y-%m-%d %H:%M:%S')}...")
             
-            # Run the pipeline module
-            # -u for unbuffered output to see logs immediately
+            # Run the pipeline module with all flags for full sync
             result = subprocess.run(
-                [sys.executable, "-u", "-m", "src.pipeline"],
-                capture_output=True,
-                text=True
+                [sys.executable, "-u", "-m", "src.pipeline", "--blocks", "--transactions", "--logs"]
             )
             
             if result.returncode == 0:
                 print("[sync] ✅ Run completed successfully.")
-                # If there was output (e.g. from dry run or future logs), print it
-                if result.stdout.strip():
-                    print(f"[output] {result.stdout.strip()}")
             else:
                 print(f"[sync] ❌ Run failed with return code {result.returncode}")
-                if result.stderr:
-                    print(f"[error] {result.stderr}")
             
             # Sleep
             print(f"[sync] Sleeping for {SLEEP_SECONDS} seconds...")
