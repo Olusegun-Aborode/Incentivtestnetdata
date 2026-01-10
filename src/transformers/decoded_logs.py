@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 import pandas as pd
 import pandera as pa
+import re
 from eth_abi import decode as abi_decode
 from eth_utils import keccak
 from pandera import Check, Column
@@ -49,9 +50,19 @@ def _normalize_value(value: Any) -> str:
     return str(value)
 
 
+def _normalize_column_name(name: str, position: int) -> str:
+    if not name:
+        return f"arg_{position}"
+    normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    normalized = re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")
+    if not normalized:
+        return f"arg_{position}"
+    return normalized
+
+
 def _input_name(input_abi: Dict[str, Any], position: int) -> str:
-    name = input_abi.get("name") or f"arg_{position}"
-    return name
+    name = input_abi.get("name")
+    return _normalize_column_name(name, position)
 
 
 def _event_signature(event_abi: Dict[str, Any]) -> Tuple[str, str]:
@@ -75,6 +86,7 @@ def _load_abi_entries(abi_dir: Path) -> List[Dict[str, Any]]:
 def _build_event_registry(abi_dir: Path) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
     event_registry: Dict[str, Dict[str, Any]] = {}
     decoded_columns: List[str] = []
+    seen_columns = set()
     for entry in _load_abi_entries(abi_dir):
         if entry.get("type") != "event":
             continue
@@ -82,8 +94,9 @@ def _build_event_registry(abi_dir: Path) -> Tuple[Dict[str, Dict[str, Any]], Lis
         event_registry[topic0] = entry
         for position, input_abi in enumerate(entry.get("inputs", [])):
             column_name = _input_name(input_abi, position)
-            if column_name not in decoded_columns:
+            if column_name not in seen_columns:
                 decoded_columns.append(column_name)
+                seen_columns.add(column_name)
     return event_registry, decoded_columns
 
 

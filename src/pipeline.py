@@ -42,7 +42,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transactions", action="store_true", help="Extract transactions")
     parser.add_argument("--logs", action="store_true", help="Extract logs (default if no flags)")
     parser.add_argument("--decoded-logs", action="store_true", help="Decode logs and upload decoded table")
+    parser.add_argument("--decoded-logs-file", type=str, default=None, help="Decode logs from a CSV export instead of extracting")
     return parser.parse_args()
+
+
+def load_logs_from_csv(path: Path) -> List[Dict]:
+    df = pd.read_csv(path)
+    logs: List[Dict] = []
+    for row in df.itertuples(index=False):
+        topics = []
+        for topic in [getattr(row, "topic0", None), getattr(row, "topic1", None), getattr(row, "topic2", None), getattr(row, "topic3", None)]:
+            if pd.isna(topic) or not topic:
+                continue
+            topics.append(str(topic))
+        
+        # Determine block_timestamp
+        block_timestamp_raw = getattr(row, "block_timestamp", None)
+        if pd.isna(block_timestamp_raw) or not block_timestamp_raw:
+            block_timestamp = datetime.utcfromtimestamp(0)
+        else:
+            block_timestamp = pd.to_datetime(block_timestamp_raw, utc=True)
+            if hasattr(block_timestamp, "to_pydatetime"):
+                block_timestamp = block_timestamp.to_pydatetime()
+
+        logs.append(
+            {
+                "blockNumber": hex(int(getattr(row, "block_number"))),
+                "transactionHash": getattr(row, "tx_hash"),
+                "logIndex": hex(int(getattr(row, "log_index"))),
+                "address": getattr(row, "address"),
+                "topics": topics,
+                "data": getattr(row, "data"),
+                "block_timestamp": block_timestamp,
+            }
+        )
+    return logs
 
 
 def enrich_logs_with_timestamps(logs: List[Dict], blocks: Dict[int, Dict]) -> None:
@@ -256,6 +290,24 @@ def main() -> None:
 
     state_path = Path(args.state_file)
     state = load_state(state_path)
+
+    if args.decoded_logs_file:
+        print(f"📄 Loading logs from {args.decoded_logs_file} for decoding...")
+        logs = load_logs_from_csv(Path(args.decoded_logs_file))
+        decoded_table = dune_cfg["tables"].get("decoded_logs", "incentiv_decoded_logs")
+        print("  Decoding logs using ABI definitions...")
+        decoded_df = decode_logs(logs=logs, chain=args.chain, abi_dir=Path("config/abis"))
+        print(f"  Uploading {len(decoded_df)} decoded logs to Dune table {decoded_table}...")
+        if args.dry_run:
+            print(f"  [DRY RUN] decoded logs file -> {len(decoded_df)} decoded logs")
+        else:
+            dune_loader.upload_dataframe(
+                table_name=decoded_table,
+                df=decoded_df,
+                description=f"{args.chain} decoded logs from CSV",
+                dedupe_columns=["block_number", "tx_hash", "log_index"],
+            )
+        return
 
     # Run logic:
     # 1. If --blocks or --transactions, run chain ETL
