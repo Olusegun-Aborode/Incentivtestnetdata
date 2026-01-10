@@ -18,6 +18,7 @@ incentiv_data/
 *.csv
 *.json
 !schemas/*.json
+!config/abis/*.json
 *.log
 *.txt
 !requirements.txt

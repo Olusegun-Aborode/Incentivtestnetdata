@@ -12,6 +12,7 @@ from src.extractors.blockscout import BlockscoutExtractor
 from src.handlers.dlq import DeadLetterQueue
 from src.loaders.dune import DuneLoader
 from src.transformers.logs import normalize_logs
+from src.transformers.decoded_logs import decode_logs
 from src.transformers.blocks import normalize_blocks
 from src.transformers.transactions import normalize_transactions
 from src.extractors.transactions import TransactionsExtractor
@@ -40,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--blocks", action="store_true", help="Extract blocks")
     parser.add_argument("--transactions", action="store_true", help="Extract transactions")
     parser.add_argument("--logs", action="store_true", help="Extract logs (default if no flags)")
+    parser.add_argument("--decoded-logs", action="store_true", help="Decode logs and upload decoded table")
     return parser.parse_args()
 
 
@@ -60,6 +62,7 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
     event_config = events[args.chain]
     dune_cfg = destinations["dune"]
     table_name = dune_cfg["tables"]["logs"]
+    decoded_table = dune_cfg["tables"].get("decoded_logs", "incentiv_decoded_logs")
 
     last_block = state.get("last_block", 0)
     safe_block = args.to_block if args.to_block is not None else extractor.get_safe_block_number()
@@ -109,6 +112,24 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
                         description=f"{args.chain} logs from Blockscout",
                         dedupe_columns=["block_number", "tx_hash", "log_index"],
                     )
+
+                if args.decoded_logs:
+                    print("  Decoding logs using ABI definitions...")
+                    decoded_df = decode_logs(
+                        logs=logs,
+                        chain=args.chain,
+                        abi_dir=Path("config/abis"),
+                    )
+                    print(f"  Uploading {len(decoded_df)} decoded logs to Dune table {decoded_table}...")
+                    if args.dry_run:
+                        print(f"  [DRY RUN] {contract_name} -> {len(decoded_df)} decoded logs")
+                    else:
+                        dune_loader.upload_dataframe(
+                            table_name=decoded_table,
+                            df=decoded_df,
+                            description=f"{args.chain} decoded logs from Blockscout",
+                            dedupe_columns=["block_number", "tx_hash", "log_index"],
+                        )
                 print(f"  ✅ Log processing complete for {contract_name}.")
             except Exception as exc:
                 print(f"  ❌ Failed to process logs for {contract_name}: {exc}")
@@ -241,7 +262,7 @@ def main() -> None:
     # 2. If --logs OR no flags provided at all, run logs ETL
     
     should_run_chain = args.blocks or args.transactions
-    should_run_logs = args.logs or not (args.blocks or args.transactions)
+    should_run_logs = args.logs or args.decoded_logs or not (args.blocks or args.transactions)
 
     if should_run_chain:
         print("🛠️ Starting Blocks/Transactions ETL...")

@@ -2,3 +2,6 @@ pandas
 pandera
 PyYAML
 requests
+eth-abi
+eth-utils
+pycryptodome
