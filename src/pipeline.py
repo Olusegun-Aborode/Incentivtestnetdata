@@ -149,21 +149,35 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
 
                 if args.decoded_logs:
                     print("  Decoding logs using ABI definitions...")
-                    decoded_df = decode_logs(
+                    decoded_tables = decode_logs(
                         logs=logs,
                         chain=args.chain,
                         abi_dir=Path("config/abis"),
                     )
-                    print(f"  Uploading {len(decoded_df)} decoded logs to Dune table {decoded_table}...")
-                    if args.dry_run:
-                        print(f"  [DRY RUN] {contract_name} -> {len(decoded_df)} decoded logs")
-                    else:
-                        dune_loader.upload_dataframe(
-                            table_name=decoded_table,
-                            df=decoded_df,
-                            description=f"{args.chain} decoded logs from Blockscout",
-                            dedupe_columns=["block_number", "tx_hash", "log_index"],
-                        )
+                    
+                    # Upload each table separately
+                    for table_key, decoded_df in decoded_tables.items():
+                        decoded_table_name = dune_cfg["tables"].get(table_key)
+                        if not decoded_table_name:
+                            print(f"  ⚠️ No table mapping for {table_key}, skipping...")
+                            continue
+                        
+                        print(f"  Uploading {len(decoded_df)} events to {decoded_table_name}...")
+                        if args.dry_run:
+                            print(f"  [DRY RUN] {table_key} -> {len(decoded_df)} events")
+                        else:
+                            try:
+                                dune_loader.upload_dataframe(
+                                    table_name=decoded_table_name,
+                                    df=decoded_df,
+                                    description=f"{args.chain} {table_key} from Blockscout",
+                                    dedupe_columns=["block_number", "tx_hash", "log_index"],
+                                )
+                                print(f"  ✅ Uploaded {len(decoded_df)} events to {decoded_table_name}")
+                            except Exception as e:
+                                print(f"  ⚠️ Failed to upload {table_key}: {e}")
+                                # Continue with other tables even if one fails
+                
                 print(f"  ✅ Log processing complete for {contract_name}.")
             except Exception as exc:
                 print(f"  ❌ Failed to process logs for {contract_name}: {exc}")

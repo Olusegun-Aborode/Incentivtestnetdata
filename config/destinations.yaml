@@ -6,4 +6,8 @@ dune:
     logs: incentiv_logs_v2
     blocks: incentiv_blocks_v2
     transactions: incentiv_transactions_v2
-    decoded_logs: incentiv_decoded_logs
+    # Decoded event tables (multi-table architecture)
+    dex_events: incentiv_dex_events
+    warp_route_events: incentiv_warp_route_events
+    hyperlane_events: incentiv_hyperlane_events
+    erc20_events: incentiv_erc20_events

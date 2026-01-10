@@ -11,6 +11,8 @@ from eth_abi import decode as abi_decode
 from eth_utils import keccak
 from pandera import Check, Column
 
+from src.transformers.event_router import get_table_for_event, get_schema_for_table
+
 
 BASE_COLUMNS = {
     "block_number": Column(int, Check.ge(0)),
@@ -53,8 +55,12 @@ def _normalize_value(value: Any) -> str:
 def _normalize_column_name(name: str, position: int) -> str:
     if not name:
         return f"arg_{position}"
-    normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    normalized = re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")
+    # Handle leading underscores
+    name = name.lstrip('_')
+    # Convert camelCase to snake_case
+    normalized = re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+    # Remove any non-alphanumeric characters except underscores
+    normalized = re.sub(r'[^a-z0-9_]+', '_', normalized).strip('_')
     if not normalized:
         return f"arg_{position}"
     return normalized
@@ -83,21 +89,14 @@ def _load_abi_entries(abi_dir: Path) -> List[Dict[str, Any]]:
     return entries
 
 
-def _build_event_registry(abi_dir: Path) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+def _build_event_registry(abi_dir: Path) -> Dict[str, Dict[str, Any]]:
     event_registry: Dict[str, Dict[str, Any]] = {}
-    decoded_columns: List[str] = []
-    seen_columns = set()
     for entry in _load_abi_entries(abi_dir):
         if entry.get("type") != "event":
             continue
         _, topic0 = _event_signature(entry)
         event_registry[topic0] = entry
-        for position, input_abi in enumerate(entry.get("inputs", [])):
-            column_name = _input_name(input_abi, position)
-            if column_name not in seen_columns:
-                decoded_columns.append(column_name)
-                seen_columns.add(column_name)
-    return event_registry, decoded_columns
+    return event_registry
 
 
 def _decode_event(event_abi: Dict[str, Any], log: Dict[str, Any]) -> Dict[str, str]:
@@ -131,15 +130,18 @@ def _decode_event(event_abi: Dict[str, Any], log: Dict[str, Any]) -> Dict[str, s
     return decoded
 
 
-def build_schema(decoded_columns: Iterable[str]) -> pa.DataFrameSchema:
-    decoded_schema = {col: Column(str, nullable=True) for col in decoded_columns}
-    return pa.DataFrameSchema({**BASE_COLUMNS, **decoded_schema})
-
-
-def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> pd.DataFrame:
-    event_registry, decoded_columns = _build_event_registry(abi_dir)
+def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> Dict[str, pd.DataFrame]:
+    """
+    Decode logs and return a dictionary of DataFrames grouped by table.
+    
+    Returns:
+        Dict mapping table names to DataFrames with decoded events
+    """
+    event_registry = _build_event_registry(abi_dir)
     extracted_at = datetime.utcnow()
-    rows: List[Dict[str, Any]] = []
+    
+    # Group rows by table
+    table_rows: Dict[str, List[Dict[str, Any]]] = {}
 
     for log in logs:
         topics = log.get("topics", [])
@@ -149,6 +151,12 @@ def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> pd.Dat
         event_abi = event_registry.get(topic0)
         if not event_abi:
             continue
+        
+        event_name = event_abi["name"]
+        table_name = get_table_for_event(event_name)
+        if not table_name:
+            continue
+        
         decoded_fields = _decode_event(event_abi, log)
         row = {
             "block_number": int(log["blockNumber"], 16),
@@ -156,14 +164,31 @@ def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> pd.Dat
             "tx_hash": log["transactionHash"].lower(),
             "log_index": int(log["logIndex"], 16),
             "address": log["address"].lower(),
-            "event_name": event_abi["name"],
+            "event_name": event_name,
             "chain": chain,
             "extracted_at": extracted_at,
         }
         row.update(decoded_fields)
-        rows.append(row)
+        
+        if table_name not in table_rows:
+            table_rows[table_name] = []
+        table_rows[table_name].append(row)
 
-    columns = list(BASE_COLUMNS.keys()) + decoded_columns
-    df = pd.DataFrame(rows, columns=columns)
-    schema = build_schema(decoded_columns)
-    return schema.validate(df)
+    # Convert to DataFrames with proper schemas
+    result = {}
+    for table_name, rows in table_rows.items():
+        schema_columns = get_schema_for_table(table_name)
+        if not schema_columns:
+            continue
+        
+        # Create DataFrame with all schema columns, filling missing with None
+        df = pd.DataFrame(rows)
+        for col in schema_columns:
+            if col not in df.columns:
+                df[col] = None
+        
+        # Reorder columns to match schema
+        df = df[schema_columns]
+        result[table_name] = df
+
+    return result
