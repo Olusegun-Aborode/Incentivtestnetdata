@@ -3,9 +3,22 @@ incentiv:
     mailbox: ${INCENTIV_MAILBOX_ADDRESS}
     hyperlane_router: ${INCENTIV_HYPERLANE_ROUTER_ADDRESS}
     dex_pool: "0xf9884c2A1749b0a02ce780aDE437cBaDFA3a961D"
+    # Warp Route token bridges (11 total)
+    warp_route_usdc: "0x16e43840d8d79896a389a3de85ab0b0210c05685"  # USDC
+    warp_route_usdt: "0x39b076b5d23f588690d480af3bf820edad31a4bb"  # USDT
+    warp_route_sol: "0xfac24134dbc4b00ee11114ecdfe6397f389203e3"   # SOL
+    warp_route_weth: "0x3e425317db7bac8077093117081b40d9b46f29cb"  # WETH
+    warp_route_cent: "0x23958cba555ac52c9495df9b121ff73003e39dbb"  # CENT
+    warp_route_pol: "0x91eee39ead58287fb4edbe52590f4a86829077b4"   # POL/MATIC
+    warp_route_eth_base: "0x34ae582ab322e72ddd12060c381c5c1a4a0bd76e"  # ETH (Base)
+    warp_route_eth_arb: "0x0a6a226eacbcccf335daa7cb38e911a92af67f81"   # ETH (Arbitrum)
+    warp_route_bnb: "0x0ad603065753a5fae9f02617c43c877d34d3ed4a"   # BNB
+    warp_route_wbtc: "0x0292593d416cb765e0e8ff77b32fa7e465958fee"  # WBTC
+    warp_route_eth: "0xdf1b8b9782f3264adef086154ac0759a5147792a"   # ETH (Ethereum)
   topics:
     transfer: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
     approval: "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
     swap_v3: "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
     received_transfer_remote: "0xba20947a325f450d232530e5f5fce293e7963499d5309a07cee84a269f2f15a6"
+    sent_transfer_remote: "0xd229aacb94204188fe8042965fa6b269c62dc5818b21238779ab64bdd17efeec"
     process: "0x0d381c2a574ae8f04e213db7cfb4df8df712cdbd427d9868ffef380660ca6574"
