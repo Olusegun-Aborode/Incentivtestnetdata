@@ -130,16 +130,31 @@ def _decode_event(event_abi: Dict[str, Any], log: Dict[str, Any]) -> Dict[str, s
     return decoded
 
 
-def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> Dict[str, pd.DataFrame]:
+def decode_logs(
+    logs: List[Dict[str, Any]],
+    chain: str,
+    abi_dir: Path,
+    include_unknown: bool = False,
+) -> Dict[str, pd.DataFrame]:
     """
     Decode logs and return a dictionary of DataFrames grouped by table.
-    
+
+    Args:
+        logs: List of raw RPC log dicts (with block_timestamp enriched)
+        chain: Chain identifier
+        abi_dir: Path to ABI JSON files
+        include_unknown: If True, unknown events (no matching ABI) are stored
+                         in an 'unknown_events' table with raw params
+
     Returns:
         Dict mapping table names to DataFrames with decoded events
     """
     event_registry = _build_event_registry(abi_dir)
     extracted_at = datetime.utcnow()
-    
+
+    # Track unknown topic0s for discovery
+    unknown_topics: Dict[str, int] = {}
+
     # Group rows by table
     table_rows: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -149,46 +164,89 @@ def decode_logs(logs: List[Dict[str, Any]], chain: str, abi_dir: Path) -> Dict[s
             continue
         topic0 = topics[0].lower()
         event_abi = event_registry.get(topic0)
+
         if not event_abi:
+            # Unknown event — not in any loaded ABI
+            unknown_topics[topic0] = unknown_topics.get(topic0, 0) + 1
+
+            if include_unknown:
+                row = {
+                    "block_number": int(log["blockNumber"], 16),
+                    "block_timestamp": log.get("block_timestamp"),
+                    "tx_hash": log["transactionHash"].lower(),
+                    "log_index": int(log["logIndex"], 16),
+                    "address": log.get("address", "").lower(),
+                    "event_name": "Unknown",
+                    "chain": chain,
+                    "extracted_at": extracted_at,
+                    "topic0": topic0,
+                    "topic1": topics[1].lower() if len(topics) > 1 else None,
+                    "topic2": topics[2].lower() if len(topics) > 2 else None,
+                    "topic3": topics[3].lower() if len(topics) > 3 else None,
+                    "data": log.get("data", "0x"),
+                }
+                if "unknown_events" not in table_rows:
+                    table_rows["unknown_events"] = []
+                table_rows["unknown_events"].append(row)
             continue
-        
+
         event_name = event_abi["name"]
         table_name = get_table_for_event(event_name)
         if not table_name:
-            continue
-        
-        decoded_fields = _decode_event(event_abi, log)
+            # Known ABI event but no routing rule — route to catch-all
+            if include_unknown:
+                table_name = "unknown_events"
+            else:
+                continue
+
+        try:
+            decoded_fields = _decode_event(event_abi, log)
+        except Exception:
+            # Decoding failed (malformed data) — skip or store raw
+            if include_unknown:
+                decoded_fields = {"decode_error": "true"}
+            else:
+                continue
+
         row = {
             "block_number": int(log["blockNumber"], 16),
-            "block_timestamp": log["block_timestamp"],
+            "block_timestamp": log.get("block_timestamp"),
             "tx_hash": log["transactionHash"].lower(),
             "log_index": int(log["logIndex"], 16),
-            "address": log["address"].lower(),
+            "address": log.get("address", "").lower(),
             "event_name": event_name,
             "chain": chain,
             "extracted_at": extracted_at,
         }
         row.update(decoded_fields)
-        
+
         if table_name not in table_rows:
             table_rows[table_name] = []
         table_rows[table_name].append(row)
+
+    # Log unknown topic summary
+    if unknown_topics:
+        sorted_unknowns = sorted(unknown_topics.items(), key=lambda x: -x[1])[:10]
+        total_unknown = sum(unknown_topics.values())
+        print(f"  Found {total_unknown} logs with {len(unknown_topics)} unknown event signatures.")
+        for sig, count in sorted_unknowns[:5]:
+            print(f"    {sig}: {count} occurrences")
 
     # Convert to DataFrames with proper schemas
     result = {}
     for table_name, rows in table_rows.items():
         schema_columns = get_schema_for_table(table_name)
-        if not schema_columns:
-            continue
-        
-        # Create DataFrame with all schema columns, filling missing with None
-        df = pd.DataFrame(rows)
-        for col in schema_columns:
-            if col not in df.columns:
-                df[col] = None
-        
-        # Reorder columns to match schema
-        df = df[schema_columns]
+        if schema_columns:
+            # Create DataFrame with all schema columns, filling missing with None
+            df = pd.DataFrame(rows)
+            for col in schema_columns:
+                if col not in df.columns:
+                    df[col] = None
+            df = df[schema_columns]
+        else:
+            # No schema defined (e.g., unknown_events) — use whatever columns exist
+            df = pd.DataFrame(rows)
+
         result[table_name] = df
 
     return result

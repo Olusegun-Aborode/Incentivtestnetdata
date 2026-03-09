@@ -19,13 +19,13 @@ TRANSACTION_SCHEMA = pa.DataFrameSchema(
         "gas": Column(int, Check.ge(0)),
         "gas_price": Column(str), # Keep as string
         "input": Column(str, nullable=True),
-        "status": Column(int, nullable=True), # From receipt
+        "status": Column("Int64", nullable=True), # From receipt
         "block_hash": Column(str, Check.str_matches(r"^0x[a-fA-F0-9]{64}$")),
         "chain": Column(str),
         "extracted_at": Column("datetime64[ns]"),
-    }
+    },
+    coerce=True
 )
-
 
 def normalize_transactions(
     blocks: List[Dict[str, Any]], chain: str, receipts_by_hash: Optional[Dict[str, Dict[str, Any]]] = None
@@ -72,4 +72,5 @@ def normalize_transactions(
         return pd.DataFrame(columns=TRANSACTION_SCHEMA.columns.keys())
         
     df = pd.DataFrame(rows)
+    df['status'] = df['status'].astype("Int64")
     return TRANSACTION_SCHEMA.validate(df)

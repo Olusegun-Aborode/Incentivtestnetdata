@@ -1,6 +1,7 @@
 import json
 import random
 import time
+import threading
 from typing import Any, Dict, Iterable, List, Optional
 
 import requests
@@ -22,24 +23,32 @@ class HttpClient:
         self.max_delay = max_delay
         self._last_request_at = 0.0
         self.session = requests.Session()
+        self._lock = threading.Lock()
 
     def _sleep_for_rate_limit(self) -> None:
-        min_interval = 1.0 / max(self.rate_limit_per_second, 0.1)
-        elapsed = time.time() - self._last_request_at
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
+        with self._lock:
+            min_interval = 1.0 / max(self.rate_limit_per_second, 0.1)
+            elapsed = time.time() - self._last_request_at
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+            self._last_request_at = time.time()
 
     def _request(self, method: str, endpoint: str, **kwargs: Any) -> Dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries):
             self._sleep_for_rate_limit()
-            self._last_request_at = time.time()
+            response = None
             try:
                 response = self.session.request(method, url, timeout=30, **kwargs)
                 response.raise_for_status()
                 return response.json()
             except Exception as exc:
+                if response is not None:
+                    try:
+                        response.close()
+                    except:
+                        pass
                 last_exc = exc
                 delay = min(self.base_delay * (2**attempt), self.max_delay)
                 delay *= 0.5 + random.random()

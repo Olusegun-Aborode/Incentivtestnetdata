@@ -38,6 +38,20 @@ EVENT_TABLE_MAP = {
     # ERC20 events
     'Transfer': 'erc20_events',
     'Approval': 'erc20_events',
+
+    # ERC-4337 Account Abstraction (EntryPoint) events
+    'UserOperationEvent': 'aa_events',
+    'UserOperationRevertReason': 'aa_events',
+    'UserOperationPrefundTooLow': 'aa_events',
+    'PostOpRevertReason': 'aa_events',
+    'AccountDeployed': 'aa_events',
+    'Deposited': 'aa_events',
+    'Withdrawn': 'aa_events',
+    'StakeLocked': 'aa_events',
+    'StakeUnlocked': 'aa_events',
+    'StakeWithdrawn': 'aa_events',
+    'BeforeExecution': 'aa_events',
+    'SignatureAggregatorChanged': 'aa_events',
 }
 
 # Define schema for each table (columns in order)
@@ -75,12 +89,32 @@ TABLE_SCHEMAS = {
         # Event-specific fields
         'from', 'to', 'owner', 'spender', 'value'
     ],
+
+    'aa_events': [
+        'block_number', 'block_timestamp', 'tx_hash', 'log_index', 'address',
+        'event_name', 'chain', 'extracted_at',
+        # UserOperationEvent fields
+        'user_op_hash', 'sender', 'paymaster', 'nonce', 'success',
+        'actual_gas_cost', 'actual_gas_used',
+        # AccountDeployed fields
+        'factory',
+        # UserOperationRevertReason / PostOpRevertReason / PrefundTooLow
+        'revert_reason',
+        # Deposited / Withdrawn / Stake fields
+        'account', 'total_deposit', 'withdraw_address', 'amount',
+        'total_staked', 'unstake_delay_sec', 'withdraw_time',
+        # SignatureAggregatorChanged
+        'aggregator',
+    ],
 }
 
 
-def get_table_for_event(event_name: str) -> str:
-    """Get the Dune table name for a given event."""
-    return EVENT_TABLE_MAP.get(event_name)
+def get_table_for_event(event_name: str, fallback_to_unknown: bool = False) -> str:
+    """Get the table name for a given event. Optionally fall back to unknown_events."""
+    table = EVENT_TABLE_MAP.get(event_name)
+    if table is None and fallback_to_unknown:
+        return "unknown_events"
+    return table
 
 
 def get_schema_for_table(table_name: str) -> List[str]:

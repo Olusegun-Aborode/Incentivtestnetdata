@@ -5,3 +5,8 @@ requests
 eth-abi
 eth-utils
 pycryptodome
+psycopg2-binary
+python-dotenv
+matplotlib
+plotly
+seaborn

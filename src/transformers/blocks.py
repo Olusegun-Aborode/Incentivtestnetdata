@@ -8,7 +8,7 @@ from pandera import Check, Column
 
 BLOCK_SCHEMA = pa.DataFrameSchema(
     {
-        "block_number": Column(int, Check.ge(0)),
+        "number": Column(int, Check.ge(0)),
         "hash": Column(str, Check.str_matches(r"^0x[a-fA-F0-9]{64}$")),
         "parent_hash": Column(str, Check.str_matches(r"^0x[a-fA-F0-9]{64}$")),
         "nonce": Column(str, nullable=True),
@@ -28,6 +28,8 @@ BLOCK_SCHEMA = pa.DataFrameSchema(
         "transaction_count": Column(int, Check.ge(0)),
         "chain": Column(str),
         "extracted_at": Column("datetime64[ns]"),
+        "created_at": Column("datetime64[ns]"),
+        "block_number": Column(int, Check.ge(0)),
     }
 )
 
@@ -35,9 +37,11 @@ BLOCK_SCHEMA = pa.DataFrameSchema(
 def normalize_blocks(blocks: List[Dict[str, Any]], chain: str) -> pd.DataFrame:
     rows = []
     extracted_at = datetime.utcnow()
+    created_at = extracted_at
     for block in blocks:
         rows.append(
             {
+                "number": int(block["number"], 16),
                 "block_number": int(block["number"], 16),
                 "hash": block["hash"],
                 "parent_hash": block["parentHash"],
@@ -58,6 +62,7 @@ def normalize_blocks(blocks: List[Dict[str, Any]], chain: str) -> pd.DataFrame:
                 "transaction_count": len(block.get("transactions", [])),
                 "chain": chain,
                 "extracted_at": extracted_at,
+                "created_at": created_at,
             }
         )
     if not rows:

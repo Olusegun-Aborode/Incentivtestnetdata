@@ -2,17 +2,20 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
+load_dotenv('.env.neon')
 
 from src.config import load_yaml
 from src.extractors.blockscout import BlockscoutExtractor
+from src.extractors.full_chain import FullChainExtractor
 from src.handlers.dlq import DeadLetterQueue
 from src.loaders.dune import DuneLoader
 from src.transformers.logs import normalize_logs
 from src.transformers.decoded_logs import decode_logs
+from src.transformers.raw_logs import normalize_raw_logs
 from src.transformers.blocks import normalize_blocks
 from src.transformers.transactions import normalize_transactions
 from src.extractors.transactions import TransactionsExtractor
@@ -43,10 +46,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logs", action="store_true", help="Extract logs (default if no flags)")
     parser.add_argument("--decoded-logs", action="store_true", help="Decode logs and upload decoded table")
     parser.add_argument("--decoded-logs-file", type=str, default=None, help="Decode logs from a CSV export instead of extracting")
+    parser.add_argument("--skip-dune", action="store_true", help="Skip Dune uploads and save data locally instead")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override batch size from config")
+
+    # New: full chain activity mode
+    parser.add_argument("--all-activity", action="store_true",
+                        help="Extract ALL on-chain activity (unfiltered logs, all blocks, all txs)")
+    parser.add_argument("--neon", action="store_true",
+                        help="Load data directly into Neon PostgreSQL instead of Dune/local CSV")
     return parser.parse_args()
 
 
+# Suppress pandera FutureWarning
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="pandera")
+
+
 def load_logs_from_csv(path: Path) -> List[Dict]:
+    import pandas as pd
     df = pd.read_csv(path)
     logs: List[Dict] = []
     for row in df.itertuples(index=False):
@@ -55,8 +72,7 @@ def load_logs_from_csv(path: Path) -> List[Dict]:
             if pd.isna(topic) or not topic:
                 continue
             topics.append(str(topic))
-        
-        # Determine block_timestamp
+
         block_timestamp_raw = getattr(row, "block_timestamp", None)
         if pd.isna(block_timestamp_raw) or not block_timestamp_raw:
             block_timestamp = datetime.utcfromtimestamp(0)
@@ -89,10 +105,207 @@ def enrich_logs_with_timestamps(logs: List[Dict], blocks: Dict[int, Dict]) -> No
         log["block_timestamp"] = datetime.utcfromtimestamp(int(block["timestamp"], 16))
 
 
+# ============================================================
+# NEW: Full chain activity ETL (--all-activity --neon)
+# ============================================================
+
+def run_all_activity_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, state: Dict, state_path: Path) -> None:
+    """
+    Extract ALL on-chain activity: blocks, transactions, and unfiltered logs.
+    Loads directly into Neon PostgreSQL.
+    """
+    from src.loaders.neon import NeonLoader
+
+    neon = NeonLoader()
+    full_extractor = FullChainExtractor(extractor)
+
+    # Determine block range
+    safe_block = args.to_block if args.to_block is not None else extractor.get_safe_block_number()
+
+    if args.neon:
+        # Try to resume from Neon state
+        neon_state = neon.get_extraction_state("all_activity")
+        last_block = neon_state.get("last_block_processed", 0)
+    else:
+        last_block = state.get("last_all_activity_block", 0)
+
+    start_block = args.from_block if args.from_block is not None else last_block + 1
+
+    if start_block > safe_block:
+        print("No new blocks to process (All Activity).")
+        neon.close()
+        return
+
+    # Use smaller batch for all-activity (more data per block)
+    batch_size = min(args.batch_size or 50, 100)
+
+    print(f"All Activity Extraction: blocks {start_block} to {safe_block}")
+    print(f"  Batch size: {batch_size} blocks")
+    print(f"  Target: {'Neon' if args.neon else 'Local CSV'}")
+    print()
+
+    total_blocks = 0
+    total_txs = 0
+    total_logs = 0
+    total_decoded = 0
+    dlq = DeadLetterQueue()
+
+    for start in range(start_block, safe_block + 1, batch_size):
+        end = min(start + batch_size - 1, safe_block)
+
+        try:
+            print(f"  Batch {start}-{end}...")
+
+            # Step 1: Extract everything
+            result = full_extractor.extract_full_batch(start, end)
+            blocks = result["blocks"]
+            transactions = result["transactions"]
+            logs = result["logs"]
+
+            b_count = len(blocks)
+            t_count = len(transactions)
+            l_count = len(logs)
+
+            print(f"    Extracted: {b_count} blocks, {t_count} txs, {l_count} logs "
+                  f"({result['elapsed_seconds']:.1f}s)")
+
+            if args.neon:
+                # Step 2a: Load blocks into Neon
+                if blocks:
+                    df_blocks = normalize_blocks(blocks, chain=args.chain)
+                    neon.copy_dataframe("blocks", df_blocks)
+
+                # Step 2b: Load transactions into Neon
+                if transactions:
+                    df_txs = normalize_transactions(blocks, chain=args.chain)
+                    neon.copy_dataframe("transactions", df_txs)
+
+                # Step 2c: Load raw logs into Neon
+                if logs:
+                    df_raw = normalize_raw_logs(logs, chain=args.chain)
+                    neon.copy_dataframe("raw_logs", df_raw)
+
+                # Step 2d: Decode known events and load to Neon
+                if logs:
+                    decoded_tables = decode_logs(
+                        logs=logs,
+                        chain=args.chain,
+                        abi_dir=Path("config/abis"),
+                        include_unknown=True,
+                    )
+                    for table_key, decoded_df in decoded_tables.items():
+                        if not decoded_df.empty:
+                            # Convert to decoded_events format with JSONB params
+                            _load_decoded_to_neon(neon, decoded_df, table_key)
+                            total_decoded += len(decoded_df)
+
+                # Step 2e: Discover contracts
+                if logs:
+                    contracts = full_extractor.discover_contracts(logs)
+                    if contracts:
+                        neon.upsert_contracts(list(contracts.values()))
+
+                # Update state in Neon
+                neon.update_extraction_state(
+                    "all_activity", end,
+                    total_items=b_count + t_count + l_count,
+                    status="running"
+                )
+            else:
+                # Save to local CSVs (fallback mode)
+                if blocks:
+                    df_blocks = normalize_blocks(blocks, chain=args.chain)
+                    backup_dir = Path("backups/blocks")
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    df_blocks.to_csv(backup_dir / f"blocks_{start}_{end}.csv", index=False)
+
+                if logs:
+                    df_raw = normalize_raw_logs(logs, chain=args.chain)
+                    backup_dir = Path("backups/all_logs")
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    df_raw.to_csv(backup_dir / f"all_logs_{start}_{end}.csv", index=False)
+
+            total_blocks += b_count
+            total_txs += t_count
+            total_logs += l_count
+
+            # Update local state too
+            state["last_all_activity_block"] = end
+            save_state(state_path, state)
+
+            print(f"    Totals: {total_blocks} blocks, {total_txs} txs, "
+                  f"{total_logs} logs, {total_decoded} decoded")
+
+        except Exception as exc:
+            print(f"    Failed batch {start}-{end}: {exc}")
+            dlq.send(
+                record={"batch": f"{start}-{end}", "mode": "all_activity"},
+                error=exc,
+                context={"from_block": start, "to_block": end},
+            )
+            if not args.dry_run:
+                print("    Aborting. State saved — resume with same command.")
+                import sys
+                sys.exit(1)
+
+    if args.neon:
+        neon.update_extraction_state("all_activity", end, status="completed")
+        print("\nRefreshing materialized views...")
+        try:
+            neon.refresh_materialized_views()
+        except Exception as e:
+            print(f"  Views refresh failed (may not have enough data yet): {e}")
+        neon.close()
+
+    print(f"\nAll Activity ETL complete.")
+    print(f"  Blocks: {total_blocks:,}")
+    print(f"  Transactions: {total_txs:,}")
+    print(f"  Raw logs: {total_logs:,}")
+    print(f"  Decoded events: {total_decoded:,}")
+
+
+def _load_decoded_to_neon(neon, decoded_df, table_key: str) -> None:
+    """Convert a decoded DataFrame to decoded_events format and load to Neon."""
+    import pandas as pd
+
+    base_cols = ["block_number", "block_timestamp", "tx_hash", "log_index",
+                 "address", "event_name", "chain", "extracted_at"]
+
+    rows = []
+    for _, row in decoded_df.iterrows():
+        # Build params from non-base columns
+        params = {}
+        for col in decoded_df.columns:
+            if col not in base_cols:
+                val = row.get(col)
+                if pd.notna(val) and val is not None and val != "":
+                    params[col] = str(val)
+
+        rows.append({
+            "event_name": row.get("event_name", "Unknown"),
+            "contract_address": row.get("address", ""),
+            "block_number": int(row.get("block_number", 0)),
+            "transaction_hash": row.get("tx_hash", ""),
+            "log_index": int(row.get("log_index", 0)),
+            "params": json.dumps(params) if params else None,
+            "timestamp": row.get("block_timestamp"),
+            "chain": row.get("chain", "incentiv"),
+        })
+
+    if rows:
+        import pandas as pd
+        df = pd.DataFrame(rows)
+        neon.copy_dataframe("decoded_events", df)
+
+
+# ============================================================
+# Original ETL functions (preserved for backward compatibility)
+# ============================================================
+
 def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_loader: DuneLoader, state: Dict, state_path: Path) -> None:
     events = load_yaml("config/events.yaml")
     destinations = load_yaml("config/destinations.yaml")
-    
+
     event_config = events[args.chain]
     dune_cfg = destinations["dune"]
     table_name = dune_cfg["tables"]["logs"]
@@ -124,22 +337,28 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
                 logs = extractor.get_logs(address, [topic_list], start, end)
                 if not logs:
                     continue
-                
-                print(f"  🔥 Found {len(logs)} logs for {contract_name}!")
+
+                print(f"  Found {len(logs)} logs for {contract_name}!")
                 block_numbers = sorted(list(set([int(log["blockNumber"], 16) for log in logs])))
                 print(f"  Fetching {len(block_numbers)} blocks for timestamps...")
                 blocks = extractor.get_blocks_by_number(block_numbers)
-                
+
                 print(f"  Enriching logs...")
                 enrich_logs_with_timestamps(logs, blocks)
-                
+
                 print(f"  Normalizing logs into DataFrame...")
                 df = normalize_logs(logs, chain=args.chain)
-                
-                print(f"  Uploading {len(df)} logs to Dune table {table_name}...")
-                if args.dry_run:
+
+                if args.skip_dune:
+                    backup_dir = Path("backups/logs")
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup_file = backup_dir / f"{contract_name}_{start}_{end}.csv"
+                    df.to_csv(backup_file, index=False)
+                    print(f"  Saved {len(df)} logs locally to {backup_file}")
+                elif args.dry_run:
                     print(f"  [DRY RUN] {contract_name} -> {len(df)} logs")
                 else:
+                    print(f"  Uploading {len(df)} logs to Dune table {table_name}...")
                     dune_loader.upload_dataframe(
                         table_name=table_name,
                         df=df,
@@ -154,18 +373,23 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
                         chain=args.chain,
                         abi_dir=Path("config/abis"),
                     )
-                    
-                    # Upload each table separately
+
                     for table_key, decoded_df in decoded_tables.items():
                         decoded_table_name = dune_cfg["tables"].get(table_key)
                         if not decoded_table_name:
-                            print(f"  ⚠️ No table mapping for {table_key}, skipping...")
+                            print(f"  No table mapping for {table_key}, skipping...")
                             continue
-                        
-                        print(f"  Uploading {len(decoded_df)} events to {decoded_table_name}...")
-                        if args.dry_run:
+
+                        if args.skip_dune:
+                            backup_dir = Path("backups/decoded_logs")
+                            backup_dir.mkdir(parents=True, exist_ok=True)
+                            backup_file = backup_dir / f"{table_key}_{start}_{end}.csv"
+                            decoded_df.to_csv(backup_file, index=False)
+                            print(f"  Saved {len(decoded_df)} decoded events to {backup_file}")
+                        elif args.dry_run:
                             print(f"  [DRY RUN] {table_key} -> {len(decoded_df)} events")
                         else:
+                            print(f"  Uploading {len(decoded_df)} events to {decoded_table_name}...")
                             try:
                                 dune_loader.upload_dataframe(
                                     table_name=decoded_table_name,
@@ -173,22 +397,21 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
                                     description=f"{args.chain} {table_key} from Blockscout",
                                     dedupe_columns=["block_number", "tx_hash", "log_index"],
                                 )
-                                print(f"  ✅ Uploaded {len(decoded_df)} events to {decoded_table_name}")
+                                print(f"  Uploaded {len(decoded_df)} events to {decoded_table_name}")
                             except Exception as e:
-                                print(f"  ⚠️ Failed to upload {table_key}: {e}")
-                                # Continue with other tables even if one fails
-                
-                print(f"  ✅ Log processing complete for {contract_name}.")
+                                print(f"  Failed to upload {table_key}: {e}")
+
+                print(f"  Log processing complete for {contract_name}.")
             except Exception as exc:
-                print(f"  ❌ Failed to process logs for {contract_name}: {exc}")
+                print(f"  Failed to process logs for {contract_name}: {exc}")
                 dlq.send(
                     record={"contract": contract_name, "topics": list(topics.keys())},
                     error=exc,
                     context={"from_block": start, "to_block": end},
                 )
                 if not args.dry_run:
-                    print(f"  ⚠️ Aborting batch {start}-{end} due to failure. State will NOT advance.")
-                    return # Stop the entire run so we don't skip this block
+                    print(f"  Aborting batch {start}-{end} due to failure. State will NOT advance.")
+                    return
 
         state["last_block"] = end
         save_state(state_path, state)
@@ -197,15 +420,11 @@ def run_logs_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_
 def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutExtractor, dune_loader: DuneLoader, state: Dict, state_path: Path) -> None:
     destinations = load_yaml("config/destinations.yaml")
     dune_cfg = destinations["dune"]
-    
-    # Tables
+
     blocks_table = dune_cfg["tables"].get("blocks", "incentiv_blocks")
     txs_table = dune_cfg["tables"].get("transactions", "incentiv_transactions")
 
-    # Use separate state for chain data to avoid conflict with logs if needed, 
-    # but for now let's use last_chain_block
     last_block = state.get("last_chain_block", 0)
-
     safe_block = args.to_block if args.to_block is not None else extractor.get_safe_block_number()
     start_block = args.from_block if args.from_block is not None else last_block + 1
 
@@ -213,9 +432,7 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
         print("No new blocks to process (Chain).")
         return
 
-    # Increase batch size for blocks (metadata), keep receipts small separately
-    batch_size = 10 
-    
+    batch_size = 10
     print(f"Chain Extraction range: {start_block} to {safe_block}")
 
     tx_extractor = TransactionsExtractor(extractor)
@@ -224,18 +441,21 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
         end = min(start + batch_size - 1, safe_block)
         try:
             block_numbers = list(range(start, end + 1))
-            
-            # Fetch blocks with transactions
             blocks_map = extractor.get_blocks_by_number(block_numbers, include_transactions=True)
             blocks = list(blocks_map.values())
-            
+
             if not blocks:
                 continue
-                
-            # Process Blocks
+
             if args.blocks:
                 df_blocks = normalize_blocks(blocks, chain=args.chain)
-                if args.dry_run:
+                if args.skip_dune:
+                    backup_dir = Path("backups/blocks")
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup_file = backup_dir / f"blocks_{start}_{end}.csv"
+                    df_blocks.to_csv(backup_file, index=False)
+                    print(f"  Saved {len(df_blocks)} blocks locally to {backup_file}")
+                elif args.dry_run:
                     print(f"Blocks {start}-{end} -> {len(df_blocks)} records")
                 else:
                     dune_loader.upload_dataframe(
@@ -245,7 +465,6 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
                         dedupe_columns=["block_number", "hash"],
                     )
 
-            # Process Transactions
             if args.transactions:
                 tx_hashes = [
                     tx["hash"]
@@ -254,14 +473,19 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
                     for tx in block["transactions"]
                     if isinstance(tx, dict) and "hash" in tx
                 ]
-                
                 receipts_by_hash = {}
                 if tx_hashes:
                     print(f"  Fetching {len(tx_hashes)} receipts...")
                     receipts_by_hash = tx_extractor.get_transaction_receipts(tx_hashes)
 
                 df_txs = normalize_transactions(blocks, chain=args.chain, receipts_by_hash=receipts_by_hash)
-                if args.dry_run:
+                if args.skip_dune:
+                    backup_dir = Path("backups/transactions")
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup_file = backup_dir / f"transactions_{start}_{end}.csv"
+                    df_txs.to_csv(backup_file, index=False)
+                    print(f"  Saved {len(df_txs)} transactions locally to {backup_file}")
+                elif args.dry_run:
                     print(f"Txs {start}-{end} -> {len(df_txs)} records")
                 else:
                     dune_loader.upload_dataframe(
@@ -270,10 +494,10 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
                         description=f"{args.chain} transactions",
                         dedupe_columns=["hash", "block_number"],
                     )
-            
+
             state["last_chain_block"] = end
             save_state(state_path, state)
-            
+
         except Exception as e:
             print(f"Error processing chain batch {start}-{end}: {e}")
             if not args.dry_run:
@@ -282,7 +506,7 @@ def run_blocks_transactions_etl(args: argparse.Namespace, extractor: BlockscoutE
 
 def main() -> None:
     args = parse_args()
-    
+
     chains = load_yaml("config/chains.yaml")
     destinations = load_yaml("config/destinations.yaml")
     chain_config = chains[args.chain]
@@ -292,21 +516,28 @@ def main() -> None:
         base_url=chain_config["blockscout_base_url"],
         rpc_url=chain_config["blockscout_rpc_url"],
         confirmations=int(chain_config["confirmations"]),
-        batch_size=int(chain_config["batch_size"]),
+        batch_size=args.batch_size if args.batch_size else int(chain_config["batch_size"]),
         rate_limit_per_second=float(chain_config["rate_limit_per_second"]),
-    )
-
-    dune_loader = DuneLoader(
-        api_key=dune_cfg["api_key"], 
-        base_url=dune_cfg["base_url"],
-        namespace=dune_cfg.get("namespace", "surgence_lab")
     )
 
     state_path = Path(args.state_file)
     state = load_state(state_path)
 
+    # New: all-activity mode
+    if args.all_activity:
+        print("Starting ALL ACTIVITY ETL...")
+        run_all_activity_etl(args, extractor, state, state_path)
+        return
+
+    # Legacy modes below
+    dune_loader = DuneLoader(
+        api_key=dune_cfg["api_key"],
+        base_url=dune_cfg["base_url"],
+        namespace=dune_cfg.get("namespace", "surgence_lab")
+    )
+
     if args.decoded_logs_file:
-        print(f"📄 Loading logs from {args.decoded_logs_file} for decoding...")
+        print(f"Loading logs from {args.decoded_logs_file} for decoding...")
         logs = load_logs_from_csv(Path(args.decoded_logs_file))
         decoded_table = dune_cfg["tables"].get("decoded_logs", "incentiv_decoded_logs")
         print("  Decoding logs using ABI definitions...")
@@ -323,19 +554,15 @@ def main() -> None:
             )
         return
 
-    # Run logic:
-    # 1. If --blocks or --transactions, run chain ETL
-    # 2. If --logs OR no flags provided at all, run logs ETL
-    
     should_run_chain = args.blocks or args.transactions
     should_run_logs = args.logs or args.decoded_logs or not (args.blocks or args.transactions)
 
     if should_run_chain:
-        print("🛠️ Starting Blocks/Transactions ETL...")
+        print("Starting Blocks/Transactions ETL...")
         run_blocks_transactions_etl(args, extractor, dune_loader, state, state_path)
 
     if should_run_logs:
-        print("🛠️ Starting Logs ETL...")
+        print("Starting Logs ETL...")
         run_logs_etl(args, extractor, dune_loader, state, state_path)
 
 
