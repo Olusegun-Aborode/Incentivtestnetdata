@@ -38,15 +38,21 @@ def normalize_raw_logs(logs: List[Dict[str, Any]], chain: str = "incentiv") -> p
     for log in logs:
         topics = log.get("topics", [])
 
+        # Safely extract topics — handle None values in the array
+        def _safe_topic(idx):
+            if len(topics) > idx and topics[idx] is not None:
+                return topics[idx].lower()
+            return None
+
         row = {
             "block_number": int(log["blockNumber"], 16),
             "transaction_hash": log["transactionHash"].lower(),
             "log_index": int(log["logIndex"], 16),
             "address": log.get("address", "").lower(),
-            "topic0": topics[0].lower() if len(topics) > 0 else None,
-            "topic1": topics[1].lower() if len(topics) > 1 else None,
-            "topic2": topics[2].lower() if len(topics) > 2 else None,
-            "topic3": topics[3].lower() if len(topics) > 3 else None,
+            "topic0": _safe_topic(0),
+            "topic1": _safe_topic(1),
+            "topic2": _safe_topic(2),
+            "topic3": _safe_topic(3),
             "data": log.get("data", "0x"),
             "block_timestamp": log.get("block_timestamp"),
             "chain": chain,

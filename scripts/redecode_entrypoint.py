@@ -20,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 from eth_abi import decode as abi_decode
 from eth_utils import keccak
+from psycopg2.extras import execute_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv
@@ -241,8 +242,6 @@ def main():
 
 def _upsert_decoded(neon, rows):
     """Upsert decoded events. Returns (inserted_count, updated_count)."""
-    from psycopg2.extras import execute_values
-
     conn = neon.conn
     cur = conn.cursor()
 

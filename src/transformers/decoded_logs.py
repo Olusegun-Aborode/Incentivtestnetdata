@@ -112,6 +112,9 @@ def _decode_event(event_abi: Dict[str, Any], log: Dict[str, Any]) -> Dict[str, s
             decoded[column_name] = None
             continue
         topic_value = topics[topic_index]
+        if topic_value is None:
+            decoded[column_name] = None
+            continue
         if _is_dynamic_type(input_abi["type"]):
             decoded[column_name] = topic_value.lower()
             continue
@@ -158,9 +161,13 @@ def decode_logs(
     # Group rows by table
     table_rows: Dict[str, List[Dict[str, Any]]] = {}
 
+    def _safe_lower(val):
+        """Safely lowercase a topic value that might be None."""
+        return val.lower() if val is not None else None
+
     for log in logs:
         topics = log.get("topics", [])
-        if not topics:
+        if not topics or topics[0] is None:
             continue
         topic0 = topics[0].lower()
         event_abi = event_registry.get(topic0)
@@ -180,9 +187,9 @@ def decode_logs(
                     "chain": chain,
                     "extracted_at": extracted_at,
                     "topic0": topic0,
-                    "topic1": topics[1].lower() if len(topics) > 1 else None,
-                    "topic2": topics[2].lower() if len(topics) > 2 else None,
-                    "topic3": topics[3].lower() if len(topics) > 3 else None,
+                    "topic1": _safe_lower(topics[1]) if len(topics) > 1 else None,
+                    "topic2": _safe_lower(topics[2]) if len(topics) > 2 else None,
+                    "topic3": _safe_lower(topics[3]) if len(topics) > 3 else None,
                     "data": log.get("data", "0x"),
                 }
                 if "unknown_events" not in table_rows:

@@ -30,11 +30,39 @@ class NeonLoader:
 
     @property
     def conn(self):
-        """Lazy connection with auto-reconnect."""
+        """Lazy connection with auto-reconnect on dead connections."""
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(self.database_url)
             self._conn.autocommit = False
+            return self._conn
+
+        # Check if the connection is actually alive (catches "No route to host"
+        # and other TCP-level disconnects that don't set .closed = True)
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            print("  [NeonLoader] Connection lost — reconnecting...")
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = psycopg2.connect(self.database_url)
+            self._conn.autocommit = False
+
         return self._conn
+
+    def reconnect(self) -> None:
+        """Force a fresh connection (call after unrecoverable errors)."""
+        try:
+            if self._conn:
+                self._conn.close()
+        except Exception:
+            pass
+        self._conn = psycopg2.connect(self.database_url)
+        self._conn.autocommit = False
+        print("  [NeonLoader] Reconnected to Neon.")
 
     def close(self) -> None:
         if self._conn and not self._conn.closed:

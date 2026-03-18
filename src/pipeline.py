@@ -244,9 +244,18 @@ def run_all_activity_etl(args: argparse.Namespace, extractor: BlockscoutExtracto
                 context={"from_block": start, "to_block": end},
             )
             if not args.dry_run:
-                print("    Aborting. State saved — resume with same command.")
-                import sys
-                sys.exit(1)
+                print(f"    ⚠️  Skipping bad batch {start}-{end} and continuing...")
+                # Advance state past this batch so we don't loop forever
+                state["last_all_activity_block"] = end
+                save_state(state_path, state)
+                if args.neon:
+                    try:
+                        neon.update_extraction_state(
+                            "all_activity", end, status="running"
+                        )
+                    except Exception:
+                        pass
+                continue
 
     if args.neon:
         neon.update_extraction_state("all_activity", end, status="completed")

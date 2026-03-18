@@ -7,6 +7,12 @@ Tabs: Overview | Swaps | Bridge | Transfers | Contracts
 
 Usage: python3 scripts/generate_dashboard.py
 Output: dashboard/incentiv_dashboard.html
+
+FIXES (v3):
+  - Blank charts: transactions table uses block_timestamp (not timestamp)
+  - User counts: JOIN decoded_events with transactions.from_address for real users
+  - JS init: Single init path, correct canvas IDs, ERC-4337 charts included
+  - Unknown events: Grouped into "Other" bucket when > 8 event types
 """
 import json
 import os
@@ -33,6 +39,17 @@ def load_enrichment():
         return {}
     data = json.loads(enrich_path.read_text(encoding="utf-8"))
     return data.get("contracts", {})
+
+
+def load_blockscout_stats():
+    """Load Blockscout stats if available (from blockscout_supplement.py --stats)."""
+    stats_path = Path("dashboard/blockscout_stats.json")
+    if not stats_path.exists():
+        print("  [INFO] No blockscout_stats.json. Run: python3 scripts/blockscout_supplement.py --stats")
+        return None
+    data = json.loads(stats_path.read_text(encoding="utf-8"))
+    print(f"  Loaded Blockscout stats (fetched: {data.get('fetched_at', 'unknown')})")
+    return data
 
 
 def get_display_name(address, enrichment):
@@ -78,7 +95,7 @@ def query_overview(neon):
     d["block_max"] = rows[0][1] or 0
 
     print("  [Overview] Blockscout KPIs...")
-    rows = neon.query("SELECT EXTRACT(EPOCH FROM (MAX(timestamp::TIMESTAMPTZ) - MIN(timestamp::TIMESTAMPTZ))) / GREATEST(COUNT(*), 1) FROM blocks WHERE timestamp IS NOT NULL")
+    rows = neon.query("SELECT EXTRACT(EPOCH FROM (MAX(timestamp::TIMESTAMPTZ) - MIN(timestamp::TIMESTAMPTZ))) / GREATEST(COUNT(*), 1) FROM blocks WHERE timestamp IS NOT NULL AND timestamp::TIMESTAMPTZ > '2025-01-01'")
     d["avg_block_time_s"] = rows[0][0] if rows and rows[0][0] else 0
 
     rows = neon.query("SELECT COUNT(*) FROM decoded_events WHERE event_name = 'Transfer'")
@@ -106,7 +123,7 @@ def query_overview(neon):
         FROM decoded_events
         WHERE event_name = 'UserOperationEvent'
           AND timestamp IS NOT NULL
-          AND timestamp > '2025-11-01'
+          AND timestamp::TIMESTAMPTZ > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["daily_userops"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": int(r[1]), "wallets": int(r[2]), "paymasters": int(r[3])} for r in rows if r[0]]
@@ -117,68 +134,61 @@ def query_overview(neon):
         cum += day["count"]
         day["cum_userops"] = cum
 
-    rows = neon.query("""
-        SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day,
-               COUNT(DISTINCT params->>'sender') as bundlers
-        FROM decoded_events
-        WHERE event_name = 'UserOperationEvent'
-          AND timestamp IS NOT NULL
-          AND timestamp > '2025-11-01'
-        GROUP BY 1 ORDER BY 1
-    """)
-    d["daily_bundlers"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": int(r[1])} for r in rows if r[0]]
-
-    rows = neon.query("""
-        SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day,
-               COUNT(DISTINCT params->>'paymaster') as paymasters
-        FROM decoded_events
-        WHERE event_name = 'UserOperationEvent'
-          AND params->>'paymaster' != '0x0000000000000000000000000000000000000000'
-          AND timestamp IS NOT NULL
-          AND timestamp > '2025-11-01'
-        GROUP BY 1 ORDER BY 1
-    """)
-    d["daily_paymasters"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": int(r[1])} for r in rows if r[0]]
-
-    rows = neon.query("SELECT COUNT(*), SUM(transactions.gas_used * COALESCE(CAST(NULLIF(gas_price, '') AS numeric), base_fee_per_gas, 0))/1e18 FROM transactions JOIN blocks ON transactions.block_number = blocks.number WHERE transactions.timestamp::TIMESTAMPTZ >= NOW() - INTERVAL '1 day'")
-    d["tx_24h"] = rows[0][0] or 0
-    d["tx_fees_24h"] = rows[0][1] or 0
-
-    rows = neon.query("SELECT COUNT(DISTINCT from_address) FROM transactions")
-    d["unique_senders"] = rows[0][0] or 0
-    rows = neon.query("SELECT COUNT(DISTINCT to_address) FROM transactions")
-    d["unique_receivers"] = rows[0][0] or 0
-
-    # Top event types for doughnut chart
+    # Top event types for doughnut chart — group small entries as "Other"
     print("  [Overview] Event type breakdown...")
     rows = neon.query("""
         SELECT event_name, COUNT(*) as cnt
         FROM decoded_events
-        GROUP BY event_name ORDER BY cnt DESC LIMIT 10
+        GROUP BY event_name ORDER BY cnt DESC
     """)
-    d["event_types"] = [{"name": r[0], "count": r[1]} for r in rows]
+    all_types = [{"name": r[0], "count": r[1]} for r in rows]
+    # Keep top 8, group rest as "Other (N types)"
+    if len(all_types) > 8:
+        top8 = all_types[:8]
+        other_count = sum(t["count"] for t in all_types[8:])
+        other_names = len(all_types) - 8
+        top8.append({"name": f"Other ({other_names} types)", "count": other_count})
+        d["event_types"] = top8
+    else:
+        d["event_types"] = all_types
 
+    # ── TRANSACTIONS-BASED METRICS ──
+    # CRITICAL: transactions table uses block_timestamp (NOT timestamp)
     print("  [Overview] Blockscout Daily Aggregates...")
     rows = neon.query("""
         SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day, COUNT(*), AVG(size), AVG(gas_limit), SUM(gas_used), AVG(COALESCE(base_fee_per_gas, 0))
-        FROM blocks WHERE timestamp IS NOT NULL AND timestamp > '2025-11-01' GROUP BY 1 ORDER BY 1
+        FROM blocks WHERE timestamp IS NOT NULL AND timestamp::TIMESTAMPTZ > '2025-01-01' GROUP BY 1 ORDER BY 1
     """)
     d["daily_blocks"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": int(r[1]), "avg_size": float(r[2] or 0), "avg_gas_limit": float(r[3] or 0), "sum_gas_used": float(r[4] or 0), "avg_base_fee": float(r[5] or 0)} for r in rows if r[0]]
 
+    # FIX: Use block_timestamp for transactions (timestamp column is NULL!)
+    print("  [Overview] Daily transactions (using block_timestamp)...")
     rows = neon.query("""
         SELECT t.day, COUNT(*) as cnt, AVG(t.fee) as avg_fee, SUM(t.fee) as sum_fee, COUNT(DISTINCT t.from_address) as acts FROM (
-            SELECT DATE_TRUNC('day', tx.timestamp::TIMESTAMPTZ) as day, tx.from_address, (tx.gas_used * COALESCE(CAST(NULLIF(tx.gas_price, '') AS numeric), b.base_fee_per_gas, 0))/1e18 as fee
+            SELECT DATE_TRUNC('day', tx.block_timestamp::TIMESTAMPTZ) as day, tx.from_address, (tx.gas_used * COALESCE(CAST(NULLIF(tx.gas_price, '') AS numeric), b.base_fee_per_gas, 0))/1e18 as fee
             FROM transactions tx LEFT JOIN blocks b ON tx.block_number = b.number
-            WHERE tx.timestamp IS NOT NULL AND tx.timestamp > '2025-11-01'
+            WHERE tx.block_timestamp IS NOT NULL
+              AND tx.block_timestamp::TIMESTAMPTZ > '2025-01-01'
         ) t GROUP BY t.day ORDER BY t.day
     """)
     d["daily_txs"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": int(r[1]), "avg_fee": float(r[2] or 0), "sum_fee": float(r[3] or 0), "accounts": int(r[4] or 0)} for r in rows if r[0]]
 
     rows = neon.query("""
-        SELECT DATE_TRUNC('day', created_at::TIMESTAMPTZ) as day, COUNT(*)
+        SELECT DATE_TRUNC('day', created_at) as day, COUNT(*)
         FROM contracts WHERE created_at IS NOT NULL GROUP BY 1 ORDER BY 1
     """)
     d["daily_contracts"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
+
+    rows = neon.query("SELECT COUNT(*), SUM(tx.gas_used * COALESCE(CAST(NULLIF(tx.gas_price, '') AS numeric), b.base_fee_per_gas, 0))/1e18 FROM transactions tx LEFT JOIN blocks b ON tx.block_number = b.number WHERE tx.block_timestamp::TIMESTAMPTZ >= NOW() - INTERVAL '1 day'")
+    d["tx_24h"] = rows[0][0] or 0
+    d["tx_fees_24h"] = rows[0][1] or 0
+
+    # FIX: Real unique user counts from transactions table
+    print("  [Overview] Unique addresses...")
+    rows = neon.query("SELECT COUNT(DISTINCT from_address) FROM transactions")
+    d["unique_senders"] = rows[0][0] or 0
+    rows = neon.query("SELECT COUNT(DISTINCT to_address) FROM transactions WHERE to_address IS NOT NULL")
+    d["unique_receivers"] = rows[0][0] or 0
 
     # Calculating cumulatives locally
     cum_txs = 0; cum_accounts = 0; cum_contracts = 0
@@ -204,9 +214,9 @@ def query_swaps(neon):
 
     print("  [Swaps] Daily swaps...")
     rows = neon.query("""
-        SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day, COUNT(*) as cnt
+        SELECT DATE_TRUNC('day', timestamp) as day, COUNT(*) as cnt
         FROM decoded_events WHERE event_name = 'Swap'
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["daily_swaps"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
@@ -221,38 +231,48 @@ def query_swaps(neon):
 
     print("  [Swaps] Hourly swap distribution...")
     rows = neon.query("""
-        SELECT EXTRACT(HOUR FROM timestamp::TIMESTAMPTZ) as hour, COUNT(*) as cnt
+        SELECT EXTRACT(HOUR FROM timestamp) as hour, COUNT(*) as cnt
         FROM decoded_events WHERE event_name = 'Swap'
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["hourly_swaps"] = [{"hour": int(r[0]), "count": r[1]} for r in rows if r[0] is not None]
 
     print("  [Swaps] Weekly swap trend...")
     rows = neon.query("""
-        SELECT DATE_TRUNC('week', timestamp::TIMESTAMPTZ) as week, COUNT(*) as cnt
+        SELECT DATE_TRUNC('week', timestamp) as week, COUNT(*) as cnt
         FROM decoded_events WHERE event_name = 'Swap'
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["weekly_swaps"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
 
-    # Unique swap participants (from params.sender and params.recipient)
-    print("  [Swaps] Unique swappers...")
+    # FIX: Real unique swap users via transactions.from_address (not event params)
+    # Swap event 'sender' param = router contract, NOT the end user
+    print("  [Swaps] Unique swappers (via tx from_address)...")
     rows = neon.query("""
-        SELECT COUNT(DISTINCT params->>'sender') as senders,
-               COUNT(DISTINCT params->>'recipient') as recipients
-        FROM decoded_events WHERE event_name = 'Swap' AND params IS NOT NULL
+        SELECT COUNT(DISTINCT t.from_address)
+        FROM decoded_events de
+        JOIN transactions t ON de.transaction_hash = t.hash
+        WHERE de.event_name = 'Swap'
     """)
     d["unique_senders"] = rows[0][0] or 0
-    d["unique_recipients"] = rows[0][1] or 0
 
-    # Top swappers by count
-    print("  [Swaps] Top swappers...")
+    # Also get unique recipients from params for reference
     rows = neon.query("""
-        SELECT params->>'sender' as sender, COUNT(*) as cnt
-        FROM decoded_events WHERE event_name = 'Swap' AND params->>'sender' IS NOT NULL
-        GROUP BY 1 ORDER BY cnt DESC LIMIT 10
+        SELECT COUNT(DISTINCT params->>'recipient')
+        FROM decoded_events WHERE event_name = 'Swap' AND params IS NOT NULL
+    """)
+    d["unique_recipients"] = rows[0][0] or 0
+
+    # Top swappers by tx from_address (REAL users)
+    print("  [Swaps] Top swappers (by tx from_address)...")
+    rows = neon.query("""
+        SELECT t.from_address, COUNT(*) as cnt
+        FROM decoded_events de
+        JOIN transactions t ON de.transaction_hash = t.hash
+        WHERE de.event_name = 'Swap'
+        GROUP BY t.from_address ORDER BY cnt DESC LIMIT 10
     """)
     d["top_swappers"] = [{"address": r[0], "count": r[1]} for r in rows]
 
@@ -277,9 +297,9 @@ def query_bridge(neon):
 
     print("  [Bridge] Daily bridge events...")
     rows = neon.query(f"""
-        SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day, COUNT(*) as cnt
+        SELECT DATE_TRUNC('day', timestamp) as day, COUNT(*) as cnt
         FROM decoded_events WHERE event_name IN {bridge_events}
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["daily_bridge"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
@@ -305,9 +325,9 @@ def query_bridge(neon):
 
     print("  [Bridge] Weekly bridge trend...")
     rows = neon.query(f"""
-        SELECT DATE_TRUNC('week', timestamp::TIMESTAMPTZ) as week, COUNT(*) as cnt
+        SELECT DATE_TRUNC('week', timestamp) as week, COUNT(*) as cnt
         FROM decoded_events WHERE event_name IN {bridge_events}
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["weekly_bridge"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
@@ -342,12 +362,13 @@ def query_bridge(neon):
     """)
     d["bridge_tokens"] = [{"address": r[0], "count": r[1]} for r in rows]
 
-    # Unique bridge users
-    print("  [Bridge] Unique bridge users...")
+    # FIX: Real unique bridge users via transactions.from_address
+    print("  [Bridge] Unique bridge users (via tx from_address)...")
     rows = neon.query("""
-        SELECT COUNT(DISTINCT params->>'recipient') FROM decoded_events
-        WHERE event_name IN ('SentTransferRemote','ReceivedTransferRemote')
-        AND params->>'recipient' IS NOT NULL
+        SELECT COUNT(DISTINCT t.from_address)
+        FROM decoded_events de
+        JOIN transactions t ON de.transaction_hash = t.hash
+        WHERE de.event_name IN ('SentTransferRemote','ReceivedTransferRemote','Dispatch','Process')
     """)
     d["unique_bridge_users"] = rows[0][0] or 0
 
@@ -362,9 +383,9 @@ def query_transfers(neon):
 
     print("  [Transfers] Daily transfers...")
     rows = neon.query("""
-        SELECT DATE_TRUNC('day', timestamp::TIMESTAMPTZ) as day, COUNT(*) as cnt
+        SELECT DATE_TRUNC('day', timestamp) as day, COUNT(*) as cnt
         FROM decoded_events WHERE event_name = 'Transfer'
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["daily_transfers"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
@@ -395,21 +416,28 @@ def query_transfers(neon):
 
     print("  [Transfers] Weekly trend...")
     rows = neon.query("""
-        SELECT DATE_TRUNC('week', timestamp::TIMESTAMPTZ) as week, COUNT(*) as cnt
+        SELECT DATE_TRUNC('week', timestamp) as week, COUNT(*) as cnt
         FROM decoded_events WHERE event_name = 'Transfer'
-        AND timestamp IS NOT NULL AND timestamp > '2025-11-01'
+        AND timestamp > '2025-01-01'
         GROUP BY 1 ORDER BY 1
     """)
     d["weekly_transfers"] = [{"date": r[0].strftime("%Y-%m-%d"), "count": r[1]} for r in rows if r[0]]
 
-    print("  [Transfers] Unique transfer participants...")
+    # FIX: Real unique transfer participants via tx from_address + event params
+    print("  [Transfers] Unique transfer participants (via tx from_address)...")
     rows = neon.query("""
-        SELECT COUNT(DISTINCT params->>'from') as senders,
-               COUNT(DISTINCT params->>'to') as receivers
-        FROM decoded_events WHERE event_name = 'Transfer' AND params IS NOT NULL
+        SELECT COUNT(DISTINCT t.from_address)
+        FROM decoded_events de
+        JOIN transactions t ON de.transaction_hash = t.hash
+        WHERE de.event_name = 'Transfer'
     """)
     d["unique_senders"] = rows[0][0] or 0
-    d["unique_receivers"] = rows[0][1] or 0
+
+    rows = neon.query("""
+        SELECT COUNT(DISTINCT params->>'to')
+        FROM decoded_events WHERE event_name = 'Transfer' AND params IS NOT NULL
+    """)
+    d["unique_receivers"] = rows[0][0] or 0
 
     return d
 
@@ -443,7 +471,7 @@ def query_contracts(neon):
 
     print("  [Contracts] New contracts per week...")
     rows = neon.query("""
-        SELECT DATE_TRUNC('week', created_at::TIMESTAMPTZ) as week, COUNT(*) as cnt
+        SELECT DATE_TRUNC('week', created_at) as week, COUNT(*) as cnt
         FROM contracts WHERE created_at IS NOT NULL
         GROUP BY 1 ORDER BY 1
     """)
@@ -463,9 +491,11 @@ def query_contracts(neon):
 
 
 # ── HTML GENERATION ──────────────────────────────────────────────
-def generate_html(overview, swaps, bridge, transfers, contracts, enrichment):
+def generate_html(overview, swaps, bridge, transfers, contracts, enrichment, bs_stats=None):
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     c = overview["counts"]
+    # Blockscout stats (real network totals) — used for KPI cards
+    bs = bs_stats or {}
 
     # Build JS-side enrichment lookup map
     enrich_js = {}
@@ -563,13 +593,29 @@ footer{{text-align:center;padding:20px;font-size:12px;color:hsl(215,20.2%,65.1%)
 
 <!-- ═══════════ OVERVIEW TAB ═══════════ -->
 <div id="tab-overview" class="tab-content active">
+    {"" if not bs else f'''<div style="margin-bottom:20px;padding:16px 20px;background:linear-gradient(135deg,rgba(96,165,250,0.08),rgba(52,211,153,0.08));border:1px solid rgba(96,165,250,0.15);border-radius:12px">
+        <div style="font-size:13px;font-weight:700;color:#60a5fa;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">Incentiv Network (Live from Explorer)</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+            <div><span style="font-size:22px;font-weight:800;color:#fff">{bs.get("total_blocks",0):,}</span><br><span style="font-size:11px;color:#94a3b8">Total Blocks</span></div>
+            <div><span style="font-size:22px;font-weight:800;color:#fff">{bs.get("total_transactions",0):,}</span><br><span style="font-size:11px;color:#94a3b8">Total Txns</span></div>
+            <div><span style="font-size:22px;font-weight:800;color:#fff">{bs.get("total_addresses",0):,}</span><br><span style="font-size:11px;color:#94a3b8">Total Addresses</span></div>
+            <div><span style="font-size:22px;font-weight:800;color:#fff">{bs.get("average_block_time_ms",0)/1000:.1f}s</span><br><span style="font-size:11px;color:#94a3b8">Avg Block Time</span></div>
+        </div>
+    </div>'''}
+    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">Our Indexed Data ({c.get("blocks",0):,} of {"~"+str(bs.get("total_blocks","?")) if bs else "?"} blocks)</div>
     <section class="kpis">
-        <div class="kpi glass blue"><div class="value">{c.get('blocks',0):,}</div><div class="label">Blocks</div></div>
+        <div class="kpi glass blue"><div class="value">{c.get('blocks',0):,}</div><div class="label">Blocks Indexed</div></div>
         <div class="kpi glass green"><div class="value">{c.get('transactions',0):,}</div><div class="label">Transactions</div></div>
         <div class="kpi glass purple"><div class="value">{c.get('raw_logs',0):,}</div><div class="label">Event Logs</div></div>
         <div class="kpi glass orange"><div class="value">{c.get('decoded_events',0):,}</div><div class="label">Decoded Events</div></div>
         <div class="kpi glass pink"><div class="value">{c.get('contracts',0):,}</div><div class="label">Contracts</div></div>
-        <div class="kpi glass teal"><div class="value">{overview['unique_senders']+overview['unique_receivers']:,}</div><div class="label">Unique Addresses</div></div>
+        <div class="kpi glass teal"><div class="value">{overview['unique_senders']:,}</div><div class="label">Unique Senders</div></div>
+    </section>
+    <section class="kpis">
+        <div class="kpi glass blue"><div class="value">{overview.get('total_user_ops',0):,}</div><div class="label">UserOps (AA)</div></div>
+        <div class="kpi glass green"><div class="value">{overview.get('total_aa_wallets',0):,}</div><div class="label">AA Wallets</div></div>
+        <div class="kpi glass purple"><div class="value">{overview.get('total_paymasters',0):,}</div><div class="label">Paymasters</div></div>
+        <div class="kpi glass orange"><div class="value">{overview.get('total_tokens',0):,}</div><div class="label">Token Contracts</div></div>
     </section>
     <section class="charts">
         <div class="chart-card glass full"><h3>Daily Transactions</h3><div class="cc tall"><canvas id="ov_daily_txs"></canvas></div></div>
@@ -578,6 +624,9 @@ footer{{text-align:center;padding:20px;font-size:12px;color:hsl(215,20.2%,65.1%)
         <div class="chart-card glass full"><h3>Network Gas Utilization</h3><div class="cc"><canvas id="ov_gas_util"></canvas></div></div>
         <div class="chart-card glass"><h3>Cumulative Transactions</h3><div class="cc"><canvas id="ov_cum_txs"></canvas></div></div>
         <div class="chart-card glass"><h3>Cumulative Contracts Discovered</h3><div class="cc"><canvas id="ov_cum_contracts"></canvas></div></div>
+        <div class="chart-card glass full"><h3>Daily UserOps (ERC-4337)</h3><div class="cc tall"><canvas id="ov_daily_userops"></canvas></div></div>
+        <div class="chart-card glass"><h3>Cumulative UserOps</h3><div class="cc"><canvas id="ov_cum_userops"></canvas></div></div>
+        <div class="chart-card glass"><h3>Daily AA Wallets</h3><div class="cc"><canvas id="ov_daily_wallets"></canvas></div></div>
     </section>
 </div>
 
@@ -586,8 +635,8 @@ footer{{text-align:center;padding:20px;font-size:12px;color:hsl(215,20.2%,65.1%)
     <section class="kpis">
         <div class="kpi glass blue"><div class="value">{swaps['total_swaps']:,}</div><div class="label">Total Swaps</div></div>
         <div class="kpi glass green"><div class="value">{len(swaps['top_pools'])}</div><div class="label">DEX Pools</div></div>
-        <div class="kpi glass purple"><div class="value">{swaps['unique_senders']}</div><div class="label">Unique Swappers</div></div>
-        <div class="kpi glass orange"><div class="value">{swaps['unique_recipients']}</div><div class="label">Unique Recipients</div></div>
+        <div class="kpi glass purple"><div class="value">{swaps['unique_senders']:,}</div><div class="label">Unique Swappers</div></div>
+        <div class="kpi glass orange"><div class="value">{swaps['unique_recipients']:,}</div><div class="label">Unique Recipients</div></div>
     </section>
     <section class="charts">
         <div class="chart-card glass full"><h3>Daily Swap Volume</h3><div class="cc tall"><canvas id="sw_daily"></canvas></div></div>
@@ -600,7 +649,7 @@ footer{{text-align:center;padding:20px;font-size:12px;color:hsl(215,20.2%,65.1%)
         <tbody id="sw_pools_tbl"></tbody></table>
     </section>
     <section class="tbl-card glass">
-        <h3>Top Swappers</h3>
+        <h3>Top Swappers (by tx from_address)</h3>
         <table><thead><tr><th>#</th><th>Address</th><th style="text-align:right">Swaps</th><th style="width:240px">Share</th></tr></thead>
         <tbody id="sw_swappers_tbl"></tbody></table>
     </section>
@@ -703,8 +752,6 @@ const OV_BLOCKS = {json.dumps(overview.get('daily_blocks',[]))};
 const OV_CONTRACTS = {json.dumps(overview.get('daily_contracts',[]))};
 const OV_EVENT_TYPES = {json.dumps(overview.get('event_types',[]))};
 const OV_USEROPS = {json.dumps(overview.get('daily_userops',[]))};
-const OV_BUNDLERS = {json.dumps(overview.get('daily_bundlers',[]))};
-const OV_PAYMASTERS = {json.dumps(overview.get('daily_paymasters',[]))};
 
 const SW_DAILY = {json.dumps(swaps['daily_swaps'])};
 const SW_WEEKLY = {json.dumps(swaps['weekly_swaps'])};
@@ -774,14 +821,18 @@ function switchTab(name) {{
 
 // ═══════ CHART BUILDERS ═══════
 function lineChart(id, labels, data, color, label) {{
-    new Chart(document.getElementById(id), {{
+    const el = document.getElementById(id);
+    if (!el) {{ console.warn('Canvas not found:', id); return; }}
+    new Chart(el, {{
         type:'line', data:{{ labels, datasets:[{{ label, data, borderColor:color, backgroundColor:color+'1a', fill:true, tension:.3, pointRadius:0, pointHoverRadius:5, borderWidth:2 }}] }},
         options:{{ responsive:true, maintainAspectRatio:false, plugins:{{ legend:{{display:false}}, tooltip:{{callbacks:{{label:c=>fmt(c.raw)+' '+label}}}} }},
             scales:{{ x:{{grid:{{display:false}},ticks:{{maxTicksLimit:15,maxRotation:45}}}}, y:{{grid:{{color:'#21262d'}},ticks:{{callback:v=>fmt(v)}}}} }} }}
     }});
 }}
 function barChart(id, labels, data, color, label, horizontal) {{
-    new Chart(document.getElementById(id), {{
+    const el = document.getElementById(id);
+    if (!el) {{ console.warn('Canvas not found:', id); return; }}
+    new Chart(el, {{
         type:'bar', data:{{ labels, datasets:[{{ label, data, backgroundColor:color+'99', borderColor:color, borderWidth:1, borderRadius:3 }}] }},
         options:{{ indexAxis: horizontal?'y':'x', responsive:true, maintainAspectRatio:false,
             plugins:{{ legend:{{display:false}}, tooltip:{{callbacks:{{label:c=>fmt(c.raw)+' '+label}}}} }},
@@ -789,7 +840,9 @@ function barChart(id, labels, data, color, label, horizontal) {{
     }});
 }}
 function doughnutChart(id, labels, data) {{
-    new Chart(document.getElementById(id), {{
+    const el = document.getElementById(id);
+    if (!el) {{ console.warn('Canvas not found:', id); return; }}
+    new Chart(el, {{
         type:'doughnut', data:{{ labels, datasets:[{{ data, backgroundColor:COLORS.slice(0,data.length), borderWidth:0 }}] }},
         options:{{ responsive:true, maintainAspectRatio:false, plugins:{{ legend:{{position:'right',labels:{{boxWidth:12,padding:8,font:{{size:11}}}}}}, tooltip:{{callbacks:{{label:c=>c.label+': '+fmt(c.raw)}}}} }} }}
     }});
@@ -835,27 +888,27 @@ function fillAddressTable(id, rows, maxVal) {{
     }});
 }}
 
-// ═══════ INIT PER TAB ═══════
+// ═══════ SINGLE INIT PER TAB (no competing paths) ═══════
 function initCharts(tab) {{
     if (tab === 'overview') {{
+        // Daily transactions (FIX: now has data from block_timestamp)
+        if(OV_TXS.length) lineChart('ov_daily_txs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.count), '#34d399', 'transactions');
         // Event type doughnut
-        if(OV_EVENT_TYPES.length) doughnutChart('ov_event_types', OV_EVENT_TYPES.map(e=>e.name), OV_EVENT_TYPES.map(e=>e.count));
+        if(OV_EVENT_TYPES.length) doughnutChart('ov_types', OV_EVENT_TYPES.map(e=>e.name), OV_EVENT_TYPES.map(e=>e.count));
+        // Active addresses (FIX: uses accounts field from daily_txs)
+        if(OV_TXS.length) lineChart('ov_active_addr', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.accounts||0), '#c084fc', 'addresses');
         // Gas utilization
-        if(OV_BLOCKS.length) lineChart('ov_gas', OV_BLOCKS.map(d=>d.date), OV_BLOCKS.map(d=>d.avg_gas_used||0), '#f0ad4e', 'avg gas used');
+        if(OV_BLOCKS.length) lineChart('ov_gas_util', OV_BLOCKS.map(d=>d.date), OV_BLOCKS.map(d=>(d.utilization*100).toFixed(2)), '#fbbf24', '% utilized');
+        // Cumulative transactions
+        if(OV_TXS.length) lineChart('ov_cum_txs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.cum_txs||0), '#60a5fa', 'cumulative txs');
         // Cumulative contracts
-        if(OV_CONTRACTS.length) lineChart('ov_cum_contracts', OV_CONTRACTS.map(d=>d.date), OV_CONTRACTS.map(d=>d.cum_count||d.count), '#bc8cff', 'contracts');
-        // Daily transactions
-        if(OV_TXS.length) lineChart('ov_daily_txs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.count), '#60a5fa', 'transactions');
-        // Active addresses
-        if(OV_TXS.length) lineChart('ov_active_addrs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.unique_senders||0), '#34d399', 'addresses');
+        if(OV_CONTRACTS.length) lineChart('ov_cum_contracts', OV_CONTRACTS.map(d=>d.date), OV_CONTRACTS.map(d=>d.cum_contracts||0), '#f472b6', 'contracts');
+        // ERC-4337 — daily UserOps
+        if(OV_USEROPS.length) barChart('ov_daily_userops', OV_USEROPS.map(d=>d.date), OV_USEROPS.map(d=>d.count), '#7c3aed', 'user ops', false);
         // ERC-4337 — cumulative UserOps
         if(OV_USEROPS.length) lineChart('ov_cum_userops', OV_USEROPS.map(d=>d.date), OV_USEROPS.map(d=>d.cum_userops||0), '#58a6ff', 'user ops');
-        // ERC-4337 — new UserOps per day
-        if(OV_USEROPS.length) barChart('ov_new_userops', OV_USEROPS.map(d=>d.date), OV_USEROPS.map(d=>d.count), '#7c3aed', 'user ops', false);
-        // ERC-4337 — active bundlers per day
-        if(OV_BUNDLERS.length) lineChart('ov_bundlers', OV_BUNDLERS.map(d=>d.date), OV_BUNDLERS.map(d=>d.count), '#f472b6', 'bundlers');
-        // ERC-4337 — active paymasters per day
-        if(OV_PAYMASTERS.length) lineChart('ov_paymasters', OV_PAYMASTERS.map(d=>d.date), OV_PAYMASTERS.map(d=>d.count), '#2dd4bf', 'paymasters');
+        // ERC-4337 — daily active wallets
+        if(OV_USEROPS.length) lineChart('ov_daily_wallets', OV_USEROPS.map(d=>d.date), OV_USEROPS.map(d=>d.wallets||0), '#34d399', 'wallets');
     }}
     if (tab === 'swaps') {{
         lineChart('sw_daily', SW_DAILY.map(d=>d.date), SW_DAILY.map(d=>d.count), '#58a6ff', 'swaps');
@@ -912,14 +965,9 @@ function initCharts(tab) {{
     }}
 }}
 
-// ═══════ INIT OVERVIEW ON LOAD ═══════
+// ═══════ INIT OVERVIEW ON LOAD (single path — no competing init) ═══════
 chartsInit['overview'] = true;
-lineChart('ov_daily_txs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.count), '#34d399', 'transactions');
-doughnutChart('ov_types', OV_EVENT_TYPES.map(e=>e.name), OV_EVENT_TYPES.map(e=>e.count));
-lineChart('ov_active_addr', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.accounts), '#c084fc', 'addresses');
-lineChart('ov_gas_util', OV_BLOCKS.map(d=>d.date), OV_BLOCKS.map(d=>(d.utilization*100).toFixed(2)), '#fbbf24', '% utilized');
-lineChart('ov_cum_txs', OV_TXS.map(d=>d.date), OV_TXS.map(d=>d.cum_txs), '#60a5fa', 'cumulative txs');
-lineChart('ov_cum_contracts', OV_CONTRACTS.map(d=>d.date), OV_CONTRACTS.map(d=>d.cum_contracts), '#f472b6', 'contracts');
+initCharts('overview');
 </script>
 </body>
 </html>"""
@@ -928,12 +976,15 @@ lineChart('ov_cum_contracts', OV_CONTRACTS.map(d=>d.date), OV_CONTRACTS.map(d=>d
 # ── MAIN ─────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
-    print("INCENTIV DASHBOARD GENERATOR (5 tabs + enrichment)")
+    print("INCENTIV DASHBOARD GENERATOR v3 (fixed charts + user counts)")
     print("=" * 60)
 
     print("\nLoading enrichment data...")
     enrichment = load_enrichment()
     print(f"  Loaded {len(enrichment)} enriched contracts")
+
+    print("\nLoading Blockscout stats...")
+    bs_stats = load_blockscout_stats()
 
     neon = NeonLoader()
     print("\nQuerying Neon DB...\n")
@@ -946,7 +997,7 @@ def main():
     neon.close()
 
     print("\nGenerating dashboard HTML...")
-    html = generate_html(overview, swaps, bridge, transfers, contracts_data, enrichment)
+    html = generate_html(overview, swaps, bridge, transfers, contracts_data, enrichment, bs_stats)
 
     out_dir = Path("dashboard")
     out_dir.mkdir(exist_ok=True)
