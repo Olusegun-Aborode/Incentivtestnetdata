@@ -85,7 +85,7 @@ export default function AccountAbstractionPage() {
       </div>
 
       {/* Daily UserOps Chart */}
-      <TuiPanel title="Daily UserOperations (90d)">
+      <TuiPanel title="Daily UserOperations" tooltip="ERC-4337 UserOperations processed daily. These are smart wallet transactions executed via the EntryPoint contract.">
         <ChartWrapper
           data={data?.dailyOps || []}
           type="area"
@@ -98,7 +98,7 @@ export default function AccountAbstractionPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Paymaster Usage */}
-        <TuiPanel title="Paymaster Usage" noPadding>
+        <TuiPanel title="Paymaster Usage" tooltip="Paymasters sponsor gas fees for users. Shows which paymaster contracts are most active and how many UserOps they've funded." noPadding>
           <DataTable
             columns={[
               { key: 'paymaster', header: 'Paymaster', render: (r) => {
@@ -117,7 +117,7 @@ export default function AccountAbstractionPage() {
         </TuiPanel>
 
         {/* Recent UserOps */}
-        <TuiPanel title="Recent UserOperations" noPadding>
+        <TuiPanel title="Recent UserOperations" tooltip="Latest ERC-4337 operations showing sender wallet, paymaster, gas cost in CENT, and success status." noPadding>
           <DataTable
             columns={[
               { key: 'timestamp', header: 'Time', render: (r) => {

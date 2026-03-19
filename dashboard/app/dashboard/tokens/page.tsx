@@ -23,13 +23,6 @@ interface TokenData {
   }[];
 }
 
-const TOKEN_COLORS: Record<string, string> = {
-  '0x16e43840d8d79896a389a3de85ab0b0210c05685': '#4A6CF7',  // USDC
-  '0x39b076b5d23f588690d480af3bf820edad31a4bb': '#059669',  // USDT
-  '0xfac24134dbc4b00ee11114ecdfe6397f389203e3': '#9333EA',  // SOL
-  '0xb0f0a14a50f14dc9e6476d61c00cf0375dd4eb04': '#E55A2B',  // WCENT
-};
-
 function formatTokenVal(raw: string, contractAddr: string): string {
   if (!raw || raw === '0') return '0';
   try {
@@ -43,8 +36,17 @@ function formatTokenVal(raw: string, contractAddr: string): string {
   }
 }
 
+const TOKEN_NAME_TO_ADDR: Record<string, string> = {
+  USDC: '0x16e43840d8d79896a389a3de85ab0b0210c05685',
+  USDT: '0x39b076b5d23f588690d480af3bf820edad31a4bb',
+  SOL: '0xfac24134dbc4b00ee11114ecdfe6397f389203e3',
+  WCENT: '0xb0f0a14a50f14dc9e6476d61c00cf0375dd4eb04',
+};
+
 export default function TokensPage() {
   const [selectedToken, setSelectedToken] = useState<string>('all');
+  const [timeRange, setTimeRange] = useState<string>('90D');
+
   const { data, isLoading, error } = useQuery<TokenData>({
     queryKey: ['tokens'],
     queryFn: async () => {
@@ -57,17 +59,58 @@ export default function TokensPage() {
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
-  const chartData = useMemo(() => {
+  // Filter chart data by time range
+  const timeFilteredVolume = useMemo(() => {
     if (!data?.dailyVolume) return [];
+    const days = timeRange === '7D' ? 7 : timeRange === '30D' ? 30 : timeRange === '180D' ? 180 : 90;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return data.dailyVolume.filter((r) => {
+      const d = new Date(r.date + ', 2026'); // dates are like "Mar 19"
+      return d >= cutoff || days >= 90; // for 90D+, show all (API only returns 90d)
+    });
+  }, [data, timeRange]);
+
+  // Build chart data — filter by selected token
+  const chartData = useMemo(() => {
+    const volume = timeFilteredVolume;
+    if (!volume.length) return [];
     const dateMap = new Map<string, Record<string, unknown>>();
-    for (const r of data.dailyVolume) {
+
+    for (const r of volume) {
       if (!dateMap.has(r.date)) dateMap.set(r.date, { date: r.date });
       const entry = dateMap.get(r.date)!;
       const name = CONTRACT_REGISTRY[r.contract_address]?.name || 'Unknown';
+
+      // If a specific token is selected, only include that token
+      if (selectedToken !== 'all') {
+        const selectedName = CONTRACT_REGISTRY[selectedToken]?.name;
+        if (name !== selectedName) continue;
+      }
+
       entry[name] = r.transfer_count;
     }
     return Array.from(dateMap.values());
-  }, [data]);
+  }, [timeFilteredVolume, selectedToken]);
+
+  // Determine which yKeys to show based on selected token
+  const chartYKeys = useMemo(() => {
+    const allKeys = [
+      { key: 'USDC', color: '#4A6CF7', name: 'USDC' },
+      { key: 'USDT', color: '#059669', name: 'USDT' },
+      { key: 'SOL', color: '#9333EA', name: 'SOL' },
+      { key: 'WCENT', color: '#E55A2B', name: 'WCENT' },
+    ];
+    if (selectedToken === 'all') return allKeys;
+    const name = CONTRACT_REGISTRY[selectedToken]?.name;
+    return allKeys.filter((k) => k.key === name);
+  }, [selectedToken]);
+
+  const filteredHolders = useMemo(() => {
+    if (!data?.topHolders) return [];
+    if (selectedToken === 'all') return data.topHolders;
+    return data.topHolders.filter((h) => h.contract_address === selectedToken);
+  }, [data, selectedToken]);
 
   const filteredTransfers = useMemo(() => {
     if (!data?.recentTransfers) return [];
@@ -77,10 +120,10 @@ export default function TokensPage() {
 
   const tokenButtons = [
     { key: 'all', label: 'All' },
-    { key: '0x16e43840d8d79896a389a3de85ab0b0210c05685', label: 'USDC' },
-    { key: '0x39b076b5d23f588690d480af3bf820edad31a4bb', label: 'USDT' },
-    { key: '0xfac24134dbc4b00ee11114ecdfe6397f389203e3', label: 'SOL' },
-    { key: '0xb0f0a14a50f14dc9e6476d61c00cf0375dd4eb04', label: 'WCENT' },
+    { key: TOKEN_NAME_TO_ADDR.USDC, label: 'USDC' },
+    { key: TOKEN_NAME_TO_ADDR.USDT, label: 'USDT' },
+    { key: TOKEN_NAME_TO_ADDR.SOL, label: 'SOL' },
+    { key: TOKEN_NAME_TO_ADDR.WCENT, label: 'WCENT' },
   ];
 
   if (error) {
@@ -98,7 +141,8 @@ export default function TokensPage() {
     <div className="space-y-6">
       {/* Token Transfer Volume Chart */}
       <TuiPanel
-        title="Token Transfer Volume (90d)"
+        title="Token Transfer Volume"
+        tooltip="Number of ERC-20 token transfers per day on the Incentiv chain. Filter by token to see individual activity."
         rightContent={
           <div className="flex gap-1">
             {tokenButtons.map((t) => (
@@ -116,21 +160,22 @@ export default function TokensPage() {
         <ChartWrapper
           data={chartData}
           type="area"
-          yKeys={[
-            { key: 'USDC', color: '#4A6CF7', name: 'USDC' },
-            { key: 'USDT', color: '#059669', name: 'USDT' },
-            { key: 'SOL', color: '#9333EA', name: 'SOL' },
-            { key: 'WCENT', color: '#E55A2B', name: 'WCENT' },
-          ]}
+          yKeys={chartYKeys}
           loading={isLoading}
           height={300}
           gradientId="token-vol"
+          timeRange={timeRange}
+          onTimeRangeChange={setTimeRange}
         />
       </TuiPanel>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Top Token Holders */}
-        <TuiPanel title="Top Addresses by Transfer Activity" noPadding>
+        <TuiPanel
+          title="Top Addresses by Transfer Activity"
+          tooltip="Addresses with the most token transfers. High transfer counts indicate active traders, bots, or protocol contracts."
+          noPadding
+        >
           <DataTable
             columns={[
               { key: 'contract_address', header: 'Token', render: (r) => {
@@ -147,20 +192,22 @@ export default function TokensPage() {
                 return <span className="text-accent-orange">{formatNumber(row.transfer_count as number)}</span>;
               }},
             ]}
-            data={(data?.topHolders || []) as Record<string, unknown>[]}
+            data={(filteredHolders || []) as Record<string, unknown>[]}
             loading={isLoading}
             rowCount={10}
           />
         </TuiPanel>
 
         {/* Recent Transfers */}
-        <TuiPanel title="Recent Token Transfers" noPadding>
+        <TuiPanel
+          title="Recent Token Transfers"
+          tooltip="Latest ERC-20 token transfers on the Incentiv chain, showing sender, receiver, amount, and transaction details."
+          noPadding
+        >
           <DataTable
             columns={[
               { key: 'contract_address', header: 'Token', render: (r) => {
                 const row = r as Record<string, unknown>;
-                const addr = (row.contract_address as string)?.toLowerCase();
-                const name = CONTRACT_REGISTRY[addr]?.name || 'Unknown';
                 return <AddressLink address={row.contract_address as string} />;
               }},
               { key: 'from_addr', header: 'From', render: (r) => {

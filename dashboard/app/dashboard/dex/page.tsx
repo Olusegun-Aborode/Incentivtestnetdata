@@ -78,7 +78,7 @@ export default function DexPage() {
       </div>
 
       {/* Swap Volume Chart */}
-      <TuiPanel title="Daily Swap Count (90d)">
+      <TuiPanel title="Daily Swap Count" tooltip="Number of UniswapV3 swap events per day on Incentiv. Shows trading activity across WCENT/USDC and WCENT/USDT pools.">
         <ChartWrapper
           data={data?.dailySwaps || []}
           type="area"
@@ -91,7 +91,7 @@ export default function DexPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Pool Activity */}
-        <TuiPanel title="Pool Activity" noPadding>
+        <TuiPanel title="Pool Activity" tooltip="UniswapV3 liquidity pool swap counts and last activity times." noPadding>
           <DataTable
             columns={[
               { key: 'contract_address', header: 'Pool', render: (r) => {
@@ -119,7 +119,7 @@ export default function DexPage() {
         </TuiPanel>
 
         {/* Recent Swaps */}
-        <TuiPanel title="Recent Swaps" noPadding>
+        <TuiPanel title="Recent Swaps" tooltip="Latest token swap transactions showing pool, direction (buy/sell), and transaction links." noPadding>
           <DataTable
             columns={[
               { key: 'timestamp', header: 'Time', render: (r) => {

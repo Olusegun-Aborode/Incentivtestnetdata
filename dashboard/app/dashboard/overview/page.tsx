@@ -88,7 +88,7 @@ export default function OverviewPage() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TuiPanel title="Daily Transactions (90d)">
+        <TuiPanel title="Daily Transactions" tooltip="Total number of transactions processed on the Incentiv chain each day.">
           <ChartWrapper
             data={data?.dailyTransactions || []}
             type="area"
@@ -99,7 +99,7 @@ export default function OverviewPage() {
           />
         </TuiPanel>
 
-        <TuiPanel title="Daily Active Addresses (90d)">
+        <TuiPanel title="Daily Active Addresses" tooltip="Unique addresses that sent or received transactions each day (from + to addresses).">
           <ChartWrapper
             data={data?.dailyActiveAddresses || []}
             type="area"
@@ -114,7 +114,7 @@ export default function OverviewPage() {
       {/* Gas + Network Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <TuiPanel title="Average Gas Usage per Block (90d)">
+          <TuiPanel title="Average Gas Usage per Block" tooltip="Average gas consumed per block, showing network demand over time. Higher values indicate more computational activity.">
             <ChartWrapper
               data={data?.dailyGas || []}
               type="bar"
@@ -125,7 +125,7 @@ export default function OverviewPage() {
           </TuiPanel>
         </div>
 
-        <TuiPanel title="Network Stats (7d)">
+        <TuiPanel title="Network Stats (7d)" tooltip="Key network performance metrics averaged over the last 7 days. CENT is the native token of Incentiv chain.">
           <div className="space-y-6">
             <div>
               <div className="metric-label">Avg Block Time</div>

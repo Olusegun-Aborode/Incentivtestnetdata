@@ -58,6 +58,7 @@ export default function ActivityPage() {
       {/* Recent Transactions */}
       <TuiPanel
         title="Recent Transactions"
+        tooltip="Latest transactions on the Incentiv chain with block, sender, receiver, value, gas, and status details."
         noPadding
         rightContent={
           <div className="flex items-center gap-2">
@@ -133,7 +134,7 @@ export default function ActivityPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Contract Leaderboard */}
-        <TuiPanel title="Contract Activity Leaderboard" noPadding>
+        <TuiPanel title="Contract Activity Leaderboard" tooltip="Most active smart contracts ranked by total decoded events. Includes DEX pools, bridge contracts, and AA EntryPoints." noPadding>
           <DataTable
             columns={[
               { key: 'rank', header: '#', render: (_r, i) => {
@@ -155,7 +156,7 @@ export default function ActivityPage() {
         </TuiPanel>
 
         {/* Event Distribution */}
-        <TuiPanel title="Event Type Distribution">
+        <TuiPanel title="Event Type Distribution" tooltip="Breakdown of decoded event types across all contracts. Shows the mix of swaps, bridges, transfers, and AA operations.">
           <ChartWrapper
             data={(data?.eventDistribution || []) as Record<string, unknown>[]}
             type="pie"

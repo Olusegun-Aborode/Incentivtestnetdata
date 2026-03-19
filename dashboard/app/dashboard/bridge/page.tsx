@@ -144,7 +144,7 @@ export default function BridgePage() {
       </div>
 
       {/* Bridge Volume Chart */}
-      <TuiPanel title="Bridge Activity (90d)">
+      <TuiPanel title="Bridge Activity" tooltip="Daily Hyperlane bridge transfers — inbound (received from other chains) vs outbound (sent to other chains).">
         <ChartWrapper
           data={data?.dailyBridge || []}
           type="area"
@@ -160,7 +160,7 @@ export default function BridgePage() {
 
       {/* Chain Flow Direction — Pie Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TuiPanel title="Inbound: Chains → Incentiv">
+        <TuiPanel title="Inbound: Chains → Incentiv" tooltip="Which chains are sending assets TO Incentiv via Hyperlane bridge. Shows transfer count and unique users per source chain.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ChartWrapper
               data={inboundPieData as Record<string, unknown>[]}
@@ -193,7 +193,7 @@ export default function BridgePage() {
           </div>
         </TuiPanel>
 
-        <TuiPanel title="Outbound: Incentiv → Chains">
+        <TuiPanel title="Outbound: Incentiv → Chains" tooltip="Which chains are receiving assets FROM Incentiv via Hyperlane bridge. Shows transfer count and unique users per destination.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ChartWrapper
               data={outboundPieData as Record<string, unknown>[]}
