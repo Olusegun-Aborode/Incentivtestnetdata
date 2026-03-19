@@ -9,7 +9,7 @@ import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
 import { formatRelativeTime, formatCompact, formatNumber, apiUrl } from '@/lib/helpers';
-import { CONTRACT_REGISTRY, CHAIN_NAMES, TOKEN_DECIMALS } from '@/lib/contracts';
+import { CHAIN_NAMES, TOKEN_DECIMALS } from '@/lib/contracts';
 
 interface ChainFlow {
   chain: string;
@@ -87,17 +87,11 @@ export default function BridgePage() {
     }));
   }, [data]);
 
-  // Compute total bridge-in volume (formatted with token decimals) — must be before early returns
-  const bridgeInVolumeDisplay = useMemo(() => {
+  // Total bridge-in transfer count — single aggregate number
+  const bridgeInTotalTransfers = useMemo(() => {
     if (!data?.inboundVolume || data.inboundVolume.length === 0) return '-';
-    return data.inboundVolume
-      .map((v) => {
-        const decimals = TOKEN_DECIMALS[v.contract_address?.toLowerCase()] || 18;
-        const vol = parseFloat(v.total_volume) / Math.pow(10, decimals);
-        const name = CONTRACT_REGISTRY[v.contract_address?.toLowerCase()]?.name || 'Token';
-        return `${formatCompact(vol)} ${name}`;
-      })
-      .join(' · ');
+    const total = data.inboundVolume.reduce((sum, v) => sum + (v.tx_count || 0), 0);
+    return formatCompact(total);
   }, [data]);
 
   if (error) {
@@ -136,8 +130,8 @@ export default function BridgePage() {
           loading={isLoading}
         />
         <MetricCard
-          label="Bridge In Volume"
-          value={bridgeInVolumeDisplay}
+          label="Bridge In Transfers"
+          value={bridgeInTotalTransfers}
           accent="cyan"
           loading={isLoading}
         />

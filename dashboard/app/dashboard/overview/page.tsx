@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import TuiPanel from '@/components/TuiPanel';
 import MetricCard from '@/components/MetricCard';
 import ChartWrapper from '@/components/ChartWrapper';
-import { formatNumber, formatCompact, formatGasUnits, apiUrl } from '@/lib/helpers';
+import { formatNumber, formatCompact, apiUrl } from '@/lib/helpers';
 
 interface OverviewData {
   metrics: {
@@ -23,6 +23,7 @@ interface OverviewData {
     avgTxsPerBlock: string;
     totalGas: string;
     avgGasPerBlock: string;
+    avgGasPrice: string;
   };
 }
 
@@ -140,9 +141,13 @@ export default function OverviewPage() {
               </div>
             </div>
             <div>
-              <div className="metric-label">Avg Gas / Block (7d)</div>
+              <div className="metric-label">Gas Tracker (7d avg)</div>
               <div className="metric-value text-accent-purple mt-1">
-                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : formatGasUnits(data?.networkStats.avgGasPerBlock)}
+                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : (() => {
+                  const wei = parseFloat(data?.networkStats.avgGasPrice || '0');
+                  const gwei = wei / 1e9;
+                  return gwei > 0 ? formatCompact(gwei) + ' Gwei' : '0 Gwei';
+                })()}
               </div>
             </div>
           </div>

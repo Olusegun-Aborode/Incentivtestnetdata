@@ -59,6 +59,7 @@ export async function GET() {
       dailyActiveAddresses,
       dailyGas,
       networkStats,
+      gasPrice,
     ] = await Promise.all([
       // Use MAX(number) for total blocks since block numbers are sequential from genesis
       queryOne<{ count: string }>(
@@ -125,6 +126,17 @@ export async function GET() {
         'overview_network_stats',
         CACHE_TTLS.NETWORK
       ),
+
+      // Average gas price from recent transactions (in wei → convert to Gwei on frontend)
+      queryOne<{ avg_gas_price: string }>(
+        `SELECT AVG(gas_price::numeric)::bigint::text as avg_gas_price
+         FROM transactions
+         WHERE block_timestamp::timestamp > NOW() - INTERVAL '7 days'
+         AND gas_price IS NOT NULL AND gas_price != '0'`,
+        [],
+        'overview_avg_gas_price',
+        CACHE_TTLS.NETWORK
+      ),
     ]);
 
     // Use BlockScout explorer stats for total addresses and total blocks (most accurate)
@@ -161,6 +173,7 @@ export async function GET() {
         avgTxsPerBlock: networkStats?.avg_txs_per_block ? parseFloat(networkStats.avg_txs_per_block).toFixed(1) : '0',
         totalGas: networkStats?.total_gas || '0',
         avgGasPerBlock: networkStats?.avg_gas_per_block || '0',
+        avgGasPrice: gasPrice?.avg_gas_price || '0',
       },
     });
   } catch (error) {
