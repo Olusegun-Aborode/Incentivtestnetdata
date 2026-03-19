@@ -47,7 +47,14 @@ export default function TokensPage() {
   const [selectedToken, setSelectedToken] = useState<string>('all');
   const { data, isLoading, error } = useQuery<TokenData>({
     queryKey: ['tokens'],
-    queryFn: () => fetch('/api/incentiv/tokens').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/incentiv/tokens');
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const chartData = useMemo(() => {

@@ -28,7 +28,14 @@ interface OverviewData {
 export default function OverviewPage() {
   const { data, isLoading, error } = useQuery<OverviewData>({
     queryKey: ['overview'],
-    queryFn: () => fetch('/api/incentiv/overview').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/incentiv/overview');
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   if (error) {

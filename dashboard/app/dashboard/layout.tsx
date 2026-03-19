@@ -56,12 +56,12 @@ export default function DashboardLayout({
       {/* Status Bar */}
       <div className="status-bar">
         <div className="flex items-center gap-2">
-          <span className="chain-badge">Incentiv Testnet</span>
+          <span className="chain-badge">Incentiv Mainnet</span>
         </div>
         <div className="flex-1" />
         <span className="text-[10px]">Chain ID: 15557</span>
         <span className="text-[10px]">|</span>
-        <span className="text-[10px]">RPC: incentiv-testnet.rpc.caldera.xyz</span>
+        <span className="text-[10px]">RPC: incentiv.rpc.caldera.xyz</span>
         <span className="text-[10px]">|</span>
         <span className="text-[10px]">Powered by Datum Labs</span>
       </div>

@@ -42,7 +42,14 @@ function getSwapDirection(amount0: string, amount1: string): string {
 export default function DexPage() {
   const { data, isLoading, error } = useQuery<DexData>({
     queryKey: ['dex'],
-    queryFn: () => fetch('/api/incentiv/dex').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/incentiv/dex');
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const totalSwaps = data?.poolActivity?.reduce((s, p) => s + p.swap_count, 0) || 0;

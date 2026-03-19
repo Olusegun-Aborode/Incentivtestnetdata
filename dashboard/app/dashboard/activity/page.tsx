@@ -32,7 +32,14 @@ export default function ActivityPage() {
 
   const { data, isLoading, error } = useQuery<ActivityData>({
     queryKey: ['activity', page],
-    queryFn: () => fetch(`/api/incentiv/activity?page=${page}`).then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch(`/api/incentiv/activity?page=${page}`);
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   if (error) {

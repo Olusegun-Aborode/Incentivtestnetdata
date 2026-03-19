@@ -48,7 +48,14 @@ function formatBridgeAmount(amount: string, contractAddr: string): string {
 export default function BridgePage() {
   const { data, isLoading, error } = useQuery<BridgeData>({
     queryKey: ['bridge'],
-    queryFn: () => fetch('/api/incentiv/bridge').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/incentiv/bridge');
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   if (error) {

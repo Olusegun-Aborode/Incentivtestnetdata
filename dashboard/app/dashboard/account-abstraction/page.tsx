@@ -33,7 +33,14 @@ interface AAData {
 export default function AccountAbstractionPage() {
   const { data, isLoading, error } = useQuery<AAData>({
     queryKey: ['aa'],
-    queryFn: () => fetch('/api/incentiv/aa').then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/incentiv/aa');
+      const json = await r.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   if (error) {
