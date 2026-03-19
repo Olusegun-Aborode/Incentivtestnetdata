@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import { query, queryOne } from '@/lib/db';
+import { query, queryOne, CACHE_TTLS } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+function cachedResponse(data: unknown) {
+  return NextResponse.json(data, {
+    headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' },
+  });
+}
 
 const ENTRYPOINT_ADDRESSES = [
   '0x3ec61c5633bbd7afa9144c6610930489736a72d4',
@@ -15,7 +21,8 @@ export async function GET() {
         `SELECT COUNT(*)::text as count FROM decoded_events
          WHERE event_name = 'UserOperationEvent'`,
         [],
-        'aa_total_ops'
+        'aa_total_ops',
+        CACHE_TTLS.COUNTS
       ),
 
       queryOne<{ total: string; successful: string }>(
@@ -25,7 +32,8 @@ export async function GET() {
         FROM decoded_events
         WHERE event_name = 'UserOperationEvent'`,
         [],
-        'aa_success_rate'
+        'aa_success_rate',
+        CACHE_TTLS.COUNTS
       ),
 
       queryOne<{ total_gas: string }>(
@@ -38,14 +46,16 @@ export async function GET() {
         FROM decoded_events
         WHERE event_name = 'UserOperationEvent'`,
         [],
-        'aa_total_gas'
+        'aa_total_gas',
+        CACHE_TTLS.COUNTS
       ),
 
       queryOne<{ count: string }>(
         `SELECT COUNT(*)::text as count FROM decoded_events
          WHERE event_name = 'AccountDeployed'`,
         [],
-        'aa_new_accounts'
+        'aa_new_accounts',
+        CACHE_TTLS.COUNTS
       ),
 
       query(
@@ -56,7 +66,8 @@ export async function GET() {
          GROUP BY DATE("timestamp")
          ORDER BY date`,
         [],
-        'aa_daily_ops'
+        'aa_daily_ops',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       query(
@@ -70,7 +81,8 @@ export async function GET() {
         ORDER BY count DESC
         LIMIT 20`,
         [],
-        'aa_paymaster_usage'
+        'aa_paymaster_usage',
+        CACHE_TTLS.LEADERBOARD
       ),
 
       query(
@@ -87,14 +99,15 @@ export async function GET() {
         ORDER BY "timestamp" DESC
         LIMIT 50`,
         [],
-        'aa_recent_ops'
+        'aa_recent_ops',
+        CACHE_TTLS.RECENT
       ),
     ]);
 
     const total = parseInt(successRate?.total || '0');
     const successful = parseInt(successRate?.successful || '0');
 
-    return NextResponse.json({
+    return cachedResponse({
       metrics: {
         totalOps: totalOps?.count || '0',
         successRate: total > 0 ? ((successful / total) * 100).toFixed(1) : '0',

@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 :root {
-  --background: #0B0D0F;
-  --foreground: #E0E0E0;
-  --card: #111318;
-  --card-hover: #1A1E24;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-bright: rgba(255, 255, 255, 0.15);
+  --background: #F8F9FB;
+  --foreground: #1A1D23;
+  --card: #FFFFFF;
+  --card-hover: #F3F4F6;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-bright: rgba(0, 0, 0, 0.15);
   --text-muted: #6B7280;
-  --accent-orange: #FF6B35;
-  --accent-red: #FF4444;
-  --accent-blue: #5B7FFF;
-  --accent-green: #10B981;
-  --accent-purple: #B44AFF;
-  --accent-cyan: #00D4FF;
-  --accent-yellow: #F59E0B;
-  --panel-header: #0D0F13;
+  --accent-orange: #E55A2B;
+  --accent-red: #DC2626;
+  --accent-blue: #4A6CF7;
+  --accent-green: #059669;
+  --accent-purple: #9333EA;
+  --accent-cyan: #0891B2;
+  --accent-yellow: #D97706;
+  --panel-header: #F1F2F5;
 }
 
 * {
@@ -32,7 +32,7 @@ body {
   overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+  font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* Scrollbar Styling */
@@ -46,21 +46,22 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 /* TUI Panel Styles */
 .tui-panel {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .tui-panel::before {
@@ -69,22 +70,23 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 1px;
+  height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent-orange), transparent);
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 .tui-panel:hover {
   border-color: var(--border-bright);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .tui-panel-header {
   background: var(--panel-header);
-  padding: 8px 12px;
-  font-size: 10px;
+  padding: 10px 14px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
+  letter-spacing: 1px;
   color: var(--accent-orange);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -106,6 +108,7 @@ body {
   letter-spacing: 1px;
   color: var(--text-muted);
   margin-top: 4px;
+  font-weight: 500;
 }
 
 /* Data Table */
@@ -119,10 +122,11 @@ body {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text-muted);
-  padding: 8px 12px;
+  padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border);
-  font-weight: 500;
+  font-weight: 600;
+  background: var(--panel-header);
 }
 
 .data-table tbody td {
@@ -145,7 +149,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent-orange);
+  background: var(--accent-green);
   animation: pulse 2s ease-in-out infinite;
   display: inline-block;
 }
@@ -159,8 +163,10 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border: 1px solid var(--border-bright);
-  border-radius: 3px;
+  border-radius: 4px;
   color: var(--text-muted);
+  background: var(--panel-header);
+  font-weight: 500;
 }
 
 /* Time Range Selector */
@@ -173,44 +179,28 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
+  font-weight: 500;
 }
 
 .time-pill:hover {
   border-color: var(--border-bright);
   color: var(--foreground);
+  background: var(--card-hover);
 }
 
 .time-pill.active {
-  background: rgba(255, 107, 53, 0.15);
+  background: rgba(229, 90, 43, 0.08);
   border-color: var(--accent-orange);
   color: var(--accent-orange);
-}
-
-/* Scanline Overlay */
-.scanline-overlay {
-  pointer-events: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9999;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.03) 2px,
-    rgba(0, 0, 0, 0.03) 4px
-  );
 }
 
 /* Loading Skeleton */
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--card) 25%,
-    var(--card-hover) 50%,
-    var(--card) 75%
+    #E5E7EB 25%,
+    #F3F4F6 50%,
+    #E5E7EB 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
@@ -221,22 +211,24 @@ body {
 .nav-link {
   font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   color: var(--text-muted);
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.15s ease;
   text-decoration: none;
+  font-weight: 500;
 }
 
 .nav-link:hover {
   color: var(--foreground);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .nav-link.active {
   color: var(--accent-orange);
-  background: rgba(255, 107, 53, 0.1);
+  background: rgba(229, 90, 43, 0.08);
+  font-weight: 600;
 }
 
 /* Status Bar */
@@ -246,7 +238,7 @@ body {
   left: 0;
   right: 0;
   height: 28px;
-  background: var(--panel-header);
+  background: var(--card);
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -259,26 +251,26 @@ body {
 
 /* Hyperlinks */
 a.explorer-link {
-  color: var(--accent-cyan);
+  color: var(--accent-blue);
   text-decoration: none;
   transition: color 0.15s;
+  font-weight: 500;
 }
 
 a.explorer-link:hover {
-  color: var(--accent-blue);
+  color: var(--accent-cyan);
   text-decoration: underline;
 }
 
 /* Recharts customizations */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
-  stroke: rgba(255, 255, 255, 0.04) !important;
+  stroke: rgba(0, 0, 0, 0.06) !important;
 }
 
 .recharts-text {
   fill: var(--text-muted) !important;
   font-size: 10px !important;
-  font-family: 'JetBrains Mono', monospace !important;
 }
 
 .recharts-tooltip-wrapper {
@@ -294,41 +286,55 @@ a.explorer-link:hover {
 
 /* Success/Fail badges */
 .badge-success {
-  color: var(--accent-green);
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #059669;
+  background: rgba(5, 150, 105, 0.08);
+  border: 1px solid rgba(5, 150, 105, 0.2);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
 .badge-fail {
-  color: var(--accent-red);
-  background: rgba(255, 68, 68, 0.1);
-  border: 1px solid rgba(255, 68, 68, 0.2);
+  color: #DC2626;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
 .badge-in {
-  color: var(--accent-green);
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #059669;
+  background: rgba(5, 150, 105, 0.08);
+  border: 1px solid rgba(5, 150, 105, 0.2);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
 .badge-out {
-  color: var(--accent-purple);
-  background: rgba(180, 74, 255, 0.1);
-  border: 1px solid rgba(180, 74, 255, 0.2);
+  color: #9333EA;
+  background: rgba(147, 51, 234, 0.08);
+  border: 1px solid rgba(147, 51, 234, 0.2);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   text-transform: uppercase;
+  font-weight: 600;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }

@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, CACHE_TTLS } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+function cachedResponse(data: unknown) {
+  return NextResponse.json(data, {
+    headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' },
+  });
+}
 
 const POOL_ADDRESSES = [
   '0xf9884c2a1749b0a02ce780ade437cbadfa3a961d', // WCENT/USDC
@@ -20,7 +26,8 @@ export async function GET() {
          GROUP BY DATE("timestamp")
          ORDER BY date`,
         [],
-        'dex_daily_swaps'
+        'dex_daily_swaps',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       // Pool activity breakdown
@@ -36,7 +43,8 @@ export async function GET() {
         GROUP BY contract_address
         ORDER BY swap_count DESC`,
         [POOL_ADDRESSES],
-        'dex_pool_activity'
+        'dex_pool_activity',
+        CACHE_TTLS.LEADERBOARD
       ),
 
       // Recent swaps
@@ -55,7 +63,8 @@ export async function GET() {
         ORDER BY "timestamp" DESC
         LIMIT 50`,
         [],
-        'dex_recent_swaps'
+        'dex_recent_swaps',
+        CACHE_TTLS.RECENT
       ),
 
       // Liquidity events (Mint/Burn)
@@ -66,11 +75,12 @@ export async function GET() {
            AND contract_address = ANY($1)
          GROUP BY event_name`,
         [POOL_ADDRESSES],
-        'dex_liquidity'
+        'dex_liquidity',
+        CACHE_TTLS.COUNTS
       ),
     ]);
 
-    return NextResponse.json({
+    return cachedResponse({
       dailySwaps: dailySwaps.map((r: Record<string, unknown>) => ({
         date: new Date(r.date as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         value: r.value,

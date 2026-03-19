@@ -34,13 +34,13 @@ interface ChartWrapperProps {
 }
 
 const CHART_COLORS = [
-  '#FF6B35', '#5B7FFF', '#10B981', '#B44AFF', '#00D4FF', '#F59E0B', '#FF4444',
+  '#E55A2B', '#4A6CF7', '#059669', '#9333EA', '#0891B2', '#D97706', '#DC2626',
 ];
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card border border-bright rounded px-3 py-2 text-xs font-mono">
+    <div className="bg-card border rounded-lg px-3 py-2 text-xs shadow-lg">
       <div className="text-text-muted mb-1">{label}</div>
       {payload.map((entry, i) => (
         <div key={i} className="flex items-center gap-2">
@@ -58,7 +58,7 @@ export default function ChartWrapper({
   xKey = 'date',
   yKey = 'value',
   yKeys,
-  color = '#FF6B35',
+  color = '#E55A2B',
   height = 250,
   loading = false,
   gradientId,
@@ -102,7 +102,7 @@ export default function ChartWrapper({
             innerRadius={60}
             outerRadius={90}
             strokeWidth={1}
-            stroke="#111318"
+            stroke="#FFFFFF"
           >
             {data.map((_, index) => (
               <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -118,9 +118,9 @@ export default function ChartWrapper({
     return (
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" />
-          <YAxis tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" tickFormatter={formatCompact} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" />
+          <YAxis tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" tickFormatter={formatCompact} />
           <Tooltip content={<CustomTooltip />} />
           {yKeys ? (
             yKeys.map((yk) => (
@@ -138,9 +138,9 @@ export default function ChartWrapper({
     return (
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" />
-          <YAxis tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" tickFormatter={formatCompact} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+          <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" />
+          <YAxis tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" tickFormatter={formatCompact} />
           <Tooltip content={<CustomTooltip />} />
           {yKeys ? (
             yKeys.map((yk) => (
@@ -164,9 +164,9 @@ export default function ChartWrapper({
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-        <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" />
-        <YAxis tick={{ fontSize: 10 }} stroke="rgba(255,255,255,0.1)" tickFormatter={formatCompact} />
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+        <XAxis dataKey={xKey} tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" />
+        <YAxis tick={{ fontSize: 10 }} stroke="rgba(0,0,0,0.12)" tickFormatter={formatCompact} />
         <Tooltip content={<CustomTooltip />} />
         {yKeys ? (
           yKeys.map((yk, i) => {

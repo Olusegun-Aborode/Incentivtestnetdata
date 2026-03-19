@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, CACHE_TTLS } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+function cachedResponse(data: unknown) {
+  return NextResponse.json(data, {
+    headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' },
+  });
+}
 
 const TOKEN_ADDRESSES = [
   '0x16e43840d8d79896a389a3de85ab0b0210c05685', // USDC
@@ -30,7 +36,8 @@ export async function GET() {
         GROUP BY DATE("timestamp"), contract_address
         ORDER BY date`,
         [TOKEN_ADDRESSES],
-        'tokens_daily_volume'
+        'tokens_daily_volume',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       // Top addresses by transfer activity
@@ -47,7 +54,8 @@ export async function GET() {
         ORDER BY transfer_count DESC
         LIMIT 50`,
         [TOKEN_ADDRESSES],
-        'tokens_top_holders'
+        'tokens_top_holders',
+        CACHE_TTLS.LEADERBOARD
       ),
 
       // Recent token transfers
@@ -65,11 +73,12 @@ export async function GET() {
         ORDER BY "timestamp" DESC NULLS LAST
         LIMIT 50`,
         [TOKEN_ADDRESSES],
-        'tokens_recent_transfers_v2'
+        'tokens_recent_transfers_v2',
+        CACHE_TTLS.RECENT
       ),
     ]);
 
-    return NextResponse.json({
+    return cachedResponse({
       dailyVolume: dailyVolume.map((r: Record<string, unknown>) => ({
         date: new Date(r.date as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         contract_address: r.contract_address,

@@ -1,34 +1,77 @@
 import { NextResponse } from 'next/server';
-import { query, queryOne } from '@/lib/db';
+import { query, queryOne, CACHE_TTLS } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+function cachedResponse(data: unknown) {
+  return NextResponse.json(data, {
+    headers: {
+      'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+    },
+  });
+}
+
+// Cache for BlockScout stats (total addresses, total blocks)
+let explorerStatsCache: { totalAddresses: string; totalBlocks: string; expiry: number } | null = null;
+const EXPLORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getExplorerStats(): Promise<{ totalAddresses: string; totalBlocks: string } | null> {
+  if (explorerStatsCache && explorerStatsCache.expiry > Date.now()) {
+    return { totalAddresses: explorerStatsCache.totalAddresses, totalBlocks: explorerStatsCache.totalBlocks };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch('https://explorer.incentiv.io/api/v2/stats', {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const data = await resp.json();
+      const stats = {
+        totalAddresses: data.total_addresses || '0',
+        totalBlocks: data.total_blocks || '0',
+      };
+      explorerStatsCache = { ...stats, expiry: Date.now() + EXPLORER_CACHE_TTL };
+      return stats;
+    }
+  } catch (error) {
+    console.error('BlockScout stats fetch error:', error);
+  }
+  return null;
+}
+
 export async function GET() {
   try {
+    // Fetch explorer stats in parallel with DB queries for accurate total addresses/blocks
+    const explorerStatsPromise = getExplorerStats();
+
     const [
       blockCount,
       txCount,
-      uniqueAddresses,
       contractCount,
       eventCount,
+      addressCount,
       dailyTxs,
       dailyActiveAddresses,
       dailyGas,
       networkStats,
     ] = await Promise.all([
-      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM blocks', [], 'overview_blocks'),
-      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM transactions', [], 'overview_txs'),
+      // Use MAX(number) for total blocks since block numbers are sequential from genesis
       queryOne<{ count: string }>(
-        `SELECT COUNT(DISTINCT addr)::text as count FROM (
-          SELECT from_address as addr FROM transactions
-          UNION
-          SELECT to_address as addr FROM transactions WHERE to_address IS NOT NULL
-        ) t`,
+        `SELECT GREATEST(MAX(number), COUNT(*))::text as count FROM blocks`,
         [],
-        'overview_addrs'
+        'overview_blocks',
+        CACHE_TTLS.COUNTS
       ),
-      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM contracts', [], 'overview_contracts'),
-      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM decoded_events', [], 'overview_events'),
+      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM transactions', [], 'overview_txs', CACHE_TTLS.COUNTS),
+      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM contracts', [], 'overview_contracts', CACHE_TTLS.COUNTS),
+      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM decoded_events', [], 'overview_events', CACHE_TTLS.COUNTS),
+      // Our own indexed address count from the addresses table
+      queryOne<{ count: string }>('SELECT COUNT(*)::text as count FROM addresses', [], 'overview_addresses', CACHE_TTLS.COUNTS),
 
       query(
         `SELECT DATE(block_timestamp::timestamp) as date, COUNT(*)::int as value
@@ -37,17 +80,26 @@ export async function GET() {
          GROUP BY DATE(block_timestamp::timestamp)
          ORDER BY date`,
         [],
-        'overview_daily_txs'
+        'overview_daily_txs',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       query(
-        `SELECT DATE(block_timestamp::timestamp) as date, COUNT(DISTINCT from_address)::int as value
-         FROM transactions
-         WHERE block_timestamp::timestamp > NOW() - INTERVAL '90 days'
-         GROUP BY DATE(block_timestamp::timestamp)
-         ORDER BY date`,
+        `SELECT date, COUNT(DISTINCT addr)::int as value FROM (
+          SELECT DATE(block_timestamp::timestamp) as date, from_address as addr
+            FROM transactions
+            WHERE block_timestamp::timestamp > NOW() - INTERVAL '90 days'
+          UNION ALL
+          SELECT DATE(block_timestamp::timestamp) as date, to_address as addr
+            FROM transactions
+            WHERE block_timestamp::timestamp > NOW() - INTERVAL '90 days'
+            AND to_address IS NOT NULL
+        ) t
+        GROUP BY date
+        ORDER BY date`,
         [],
-        'overview_daily_active'
+        'overview_daily_active',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       query(
@@ -57,7 +109,8 @@ export async function GET() {
          GROUP BY DATE("timestamp"::timestamp)
          ORDER BY date`,
         [],
-        'overview_daily_gas'
+        'overview_daily_gas',
+        CACHE_TTLS.DAILY_SERIES
       ),
 
       queryOne<{ avg_block_time: string; avg_txs_per_block: string; total_gas: string }>(
@@ -68,15 +121,25 @@ export async function GET() {
         FROM blocks
         WHERE "timestamp"::timestamp > NOW() - INTERVAL '7 days'`,
         [],
-        'overview_network_stats'
+        'overview_network_stats',
+        CACHE_TTLS.NETWORK
       ),
     ]);
 
-    return NextResponse.json({
+    // Use BlockScout explorer stats for total addresses and total blocks (most accurate)
+    const explorerStats = await explorerStatsPromise;
+
+    // For total blocks: prefer explorer stats, fall back to our DB MAX(number)
+    const totalBlocks = explorerStats?.totalBlocks || blockCount?.count || '0';
+
+    // For unique addresses: use explorer stats (most complete), fall back to our indexed addresses table
+    const uniqueAddresses = explorerStats?.totalAddresses || addressCount?.count || '0';
+
+    return cachedResponse({
       metrics: {
-        totalBlocks: blockCount?.count || '0',
+        totalBlocks,
         totalTransactions: txCount?.count || '0',
-        uniqueAddresses: uniqueAddresses?.count || '0',
+        uniqueAddresses,
         totalContracts: contractCount?.count || '0',
         totalEvents: eventCount?.count || '0',
       },

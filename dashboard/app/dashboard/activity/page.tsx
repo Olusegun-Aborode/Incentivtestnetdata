@@ -7,7 +7,7 @@ import DataTable from '@/components/DataTable';
 import ChartWrapper from '@/components/ChartWrapper';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatNumber, formatCompact, formatEther, formatGwei } from '@/lib/helpers';
+import { formatRelativeTime, formatNumber, formatCompact, formatEther, formatGwei, apiUrl } from '@/lib/helpers';
 import { getExplorerBlockUrl } from '@/lib/contracts';
 
 interface ActivityData {
@@ -33,7 +33,7 @@ export default function ActivityPage() {
   const { data, isLoading, error } = useQuery<ActivityData>({
     queryKey: ['activity', page],
     queryFn: async () => {
-      const r = await fetch(`/api/incentiv/activity?page=${page}`);
+      const r = await fetch(apiUrl(`/api/incentiv/activity?page=${page}`));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -165,7 +165,7 @@ export default function ActivityPage() {
           {data?.eventDistribution && (
             <div className="mt-4 grid grid-cols-2 gap-2">
               {data.eventDistribution.slice(0, 8).map((evt, i) => {
-                const colors = ['#FF6B35', '#5B7FFF', '#10B981', '#B44AFF', '#00D4FF', '#F59E0B', '#FF4444', '#E0E0E0'];
+                const colors = ['#E55A2B', '#4A6CF7', '#059669', '#9333EA', '#0891B2', '#D97706', '#DC2626', '#9CA3AF'];
                 return (
                   <div key={evt.name} className="flex items-center gap-2 text-xs">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colors[i % colors.length] }} />

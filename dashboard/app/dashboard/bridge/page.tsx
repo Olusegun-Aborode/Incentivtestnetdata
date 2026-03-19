@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import TuiPanel from '@/components/TuiPanel';
 import MetricCard from '@/components/MetricCard';
@@ -8,16 +8,28 @@ import ChartWrapper from '@/components/ChartWrapper';
 import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatCompact } from '@/lib/helpers';
+import { formatRelativeTime, formatCompact, formatNumber, apiUrl } from '@/lib/helpers';
 import { CONTRACT_REGISTRY, CHAIN_NAMES, TOKEN_DECIMALS } from '@/lib/contracts';
+
+interface ChainFlow {
+  chain: string;
+  chain_id: string;
+  count: number;
+  unique_users: number;
+}
 
 interface BridgeData {
   metrics: {
     inbound: string;
     outbound: string;
   };
+  inboundVolume: { contract_address: string; total_volume: string; tx_count: number }[];
   dailyBridge: { date: string; inbound: number; outbound: number }[];
   bridgeByToken: { contract_address: string; event_name: string; count: number }[];
+  chainFlows: {
+    inboundFrom: ChainFlow[];  // Chains sending assets TO Incentiv
+    outboundTo: ChainFlow[];   // Chains receiving assets FROM Incentiv
+  };
   recentBridge: {
     event_name: string;
     contract_address: string;
@@ -49,7 +61,7 @@ export default function BridgePage() {
   const { data, isLoading, error } = useQuery<BridgeData>({
     queryKey: ['bridge'],
     queryFn: async () => {
-      const r = await fetch('/api/incentiv/bridge');
+      const r = await fetch(apiUrl('/api/incentiv/bridge'));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -57,6 +69,36 @@ export default function BridgePage() {
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
+
+  // Prepare pie chart data for chain flows (must be before early returns)
+  const inboundPieData = useMemo(() => {
+    if (!data?.chainFlows?.inboundFrom) return [];
+    return data.chainFlows.inboundFrom.map((c) => ({
+      name: c.chain,
+      value: c.count,
+    }));
+  }, [data]);
+
+  const outboundPieData = useMemo(() => {
+    if (!data?.chainFlows?.outboundTo) return [];
+    return data.chainFlows.outboundTo.map((c) => ({
+      name: c.chain,
+      value: c.count,
+    }));
+  }, [data]);
+
+  // Compute total bridge-in volume (formatted with token decimals) — must be before early returns
+  const bridgeInVolumeDisplay = useMemo(() => {
+    if (!data?.inboundVolume || data.inboundVolume.length === 0) return '-';
+    return data.inboundVolume
+      .map((v) => {
+        const decimals = TOKEN_DECIMALS[v.contract_address?.toLowerCase()] || 18;
+        const vol = parseFloat(v.total_volume) / Math.pow(10, decimals);
+        const name = CONTRACT_REGISTRY[v.contract_address?.toLowerCase()]?.name || 'Token';
+        return `${formatCompact(vol)} ${name}`;
+      })
+      .join(' · ');
+  }, [data]);
 
   if (error) {
     return (
@@ -74,7 +116,7 @@ export default function BridgePage() {
   return (
     <div className="space-y-6">
       {/* Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard
           label="Total Bridge Transfers"
           value={formatCompact(totalBridge)}
@@ -93,6 +135,12 @@ export default function BridgePage() {
           accent="purple"
           loading={isLoading}
         />
+        <MetricCard
+          label="Bridge In Volume"
+          value={bridgeInVolumeDisplay}
+          accent="cyan"
+          loading={isLoading}
+        />
       </div>
 
       {/* Bridge Volume Chart */}
@@ -101,14 +149,83 @@ export default function BridgePage() {
           data={data?.dailyBridge || []}
           type="area"
           yKeys={[
-            { key: 'inbound', color: '#10B981', name: 'Inbound' },
-            { key: 'outbound', color: '#B44AFF', name: 'Outbound' },
+            { key: 'inbound', color: '#059669', name: 'Inbound' },
+            { key: 'outbound', color: '#9333EA', name: 'Outbound' },
           ]}
           gradientId="bridge-vol"
           loading={isLoading}
           height={280}
         />
       </TuiPanel>
+
+      {/* Chain Flow Direction — Pie Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TuiPanel title="Inbound: Chains → Incentiv">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ChartWrapper
+              data={inboundPieData as Record<string, unknown>[]}
+              type="pie"
+              pieDataKey="value"
+              pieNameKey="name"
+              loading={isLoading}
+              height={200}
+            />
+            <div className="space-y-2 flex flex-col justify-center px-2">
+              {(data?.chainFlows?.inboundFrom || []).map((c, i) => {
+                const colors = ['#E55A2B', '#4A6CF7', '#059669', '#9333EA', '#0891B2', '#D97706', '#DC2626'];
+                const total = (data?.chainFlows?.inboundFrom || []).reduce((s, x) => s + x.count, 0);
+                const pct = total > 0 ? ((c.count / total) * 100).toFixed(1) : '0';
+                return (
+                  <div key={c.chain_id} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: colors[i % colors.length] }} />
+                      <span className="text-foreground font-medium">{c.chain}</span>
+                    </span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-text-muted">{pct}%</span>
+                      <span className="text-accent-orange font-semibold">{formatCompact(c.count)}</span>
+                      <span className="text-accent-cyan">{formatCompact(c.unique_users)} users</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TuiPanel>
+
+        <TuiPanel title="Outbound: Incentiv → Chains">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ChartWrapper
+              data={outboundPieData as Record<string, unknown>[]}
+              type="pie"
+              pieDataKey="value"
+              pieNameKey="name"
+              loading={isLoading}
+              height={200}
+            />
+            <div className="space-y-2 flex flex-col justify-center px-2">
+              {(data?.chainFlows?.outboundTo || []).map((c, i) => {
+                const colors = ['#E55A2B', '#4A6CF7', '#059669', '#9333EA', '#0891B2', '#D97706', '#DC2626'];
+                const total = (data?.chainFlows?.outboundTo || []).reduce((s, x) => s + x.count, 0);
+                const pct = total > 0 ? ((c.count / total) * 100).toFixed(1) : '0';
+                return (
+                  <div key={c.chain_id} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: colors[i % colors.length] }} />
+                      <span className="text-foreground font-medium">{c.chain}</span>
+                    </span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-text-muted">{pct}%</span>
+                      <span className="text-accent-orange font-semibold">{formatCompact(c.count)}</span>
+                      <span className="text-accent-cyan">{formatCompact(c.unique_users)} users</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TuiPanel>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Bridge by Token */}

@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, CACHE_TTLS } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+function cachedResponse(data: unknown) {
+  return NextResponse.json(data, {
+    headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=300' },
+  });
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -26,7 +32,8 @@ export async function GET(request: Request) {
         ORDER BY block_number DESC
         LIMIT $1 OFFSET $2`,
         [limit, offset],
-        `activity_txs_p${page}`
+        `activity_txs_p${page}`,
+        CACHE_TTLS.RECENT
       ),
 
       query(
@@ -37,7 +44,8 @@ export async function GET(request: Request) {
         ORDER BY event_count DESC
         LIMIT 20`,
         [],
-        'activity_contract_leaderboard'
+        'activity_contract_leaderboard',
+        CACHE_TTLS.LEADERBOARD
       ),
 
       query(
@@ -47,11 +55,12 @@ export async function GET(request: Request) {
          ORDER BY value DESC
          LIMIT 10`,
         [],
-        'activity_event_distribution'
+        'activity_event_distribution',
+        CACHE_TTLS.COUNTS
       ),
     ]);
 
-    return NextResponse.json({
+    return cachedResponse({
       recentTransactions: recentTxs,
       contractLeaderboard,
       eventDistribution,

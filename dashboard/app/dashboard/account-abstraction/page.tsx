@@ -8,7 +8,7 @@ import ChartWrapper from '@/components/ChartWrapper';
 import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatNumber, formatCompact, formatEther } from '@/lib/helpers';
+import { formatRelativeTime, formatNumber, formatCompact, formatEther, apiUrl } from '@/lib/helpers';
 
 interface AAData {
   metrics: {
@@ -34,7 +34,7 @@ export default function AccountAbstractionPage() {
   const { data, isLoading, error } = useQuery<AAData>({
     queryKey: ['aa'],
     queryFn: async () => {
-      const r = await fetch('/api/incentiv/aa');
+      const r = await fetch(apiUrl('/api/incentiv/aa'));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -89,7 +89,7 @@ export default function AccountAbstractionPage() {
         <ChartWrapper
           data={data?.dailyOps || []}
           type="area"
-          color="#FF6B35"
+          color="#E55A2B"
           gradientId="aa-daily"
           loading={isLoading}
           height={280}

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import TuiPanel from '@/components/TuiPanel';
 import MetricCard from '@/components/MetricCard';
 import ChartWrapper from '@/components/ChartWrapper';
-import { formatNumber, formatCompact } from '@/lib/helpers';
+import { formatNumber, formatCompact, formatGasUnits, apiUrl } from '@/lib/helpers';
 
 interface OverviewData {
   metrics: {
@@ -29,7 +29,7 @@ export default function OverviewPage() {
   const { data, isLoading, error } = useQuery<OverviewData>({
     queryKey: ['overview'],
     queryFn: async () => {
-      const r = await fetch('/api/incentiv/overview');
+      const r = await fetch(apiUrl('/api/incentiv/overview'));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -91,7 +91,7 @@ export default function OverviewPage() {
           <ChartWrapper
             data={data?.dailyTransactions || []}
             type="area"
-            color="#FF6B35"
+            color="#E55A2B"
             gradientId="daily-txs"
             loading={isLoading}
             height={280}
@@ -102,7 +102,7 @@ export default function OverviewPage() {
           <ChartWrapper
             data={data?.dailyActiveAddresses || []}
             type="area"
-            color="#10B981"
+            color="#059669"
             gradientId="daily-active"
             loading={isLoading}
             height={280}
@@ -117,7 +117,7 @@ export default function OverviewPage() {
             <ChartWrapper
               data={data?.dailyGas || []}
               type="bar"
-              color="#5B7FFF"
+              color="#4A6CF7"
               loading={isLoading}
               height={250}
             />
@@ -139,9 +139,9 @@ export default function OverviewPage() {
               </div>
             </div>
             <div>
-              <div className="metric-label">Total Gas Consumed</div>
+              <div className="metric-label">Total Gas Consumed (7d)</div>
               <div className="metric-value text-accent-purple mt-1">
-                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : formatCompact(data?.networkStats.totalGas)}
+                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : formatGasUnits(data?.networkStats.totalGas)}
               </div>
             </div>
           </div>

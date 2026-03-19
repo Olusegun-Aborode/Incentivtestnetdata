@@ -8,7 +8,7 @@ import ChartWrapper from '@/components/ChartWrapper';
 import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatNumber, formatCompact } from '@/lib/helpers';
+import { formatRelativeTime, formatNumber, formatCompact, apiUrl } from '@/lib/helpers';
 import { POOL_NAMES } from '@/lib/contracts';
 
 interface DexData {
@@ -43,7 +43,7 @@ export default function DexPage() {
   const { data, isLoading, error } = useQuery<DexData>({
     queryKey: ['dex'],
     queryFn: async () => {
-      const r = await fetch('/api/incentiv/dex');
+      const r = await fetch(apiUrl('/api/incentiv/dex'));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -82,7 +82,7 @@ export default function DexPage() {
         <ChartWrapper
           data={data?.dailySwaps || []}
           type="area"
-          color="#FF6B35"
+          color="#E55A2B"
           gradientId="dex-swaps"
           loading={isLoading}
           height={280}

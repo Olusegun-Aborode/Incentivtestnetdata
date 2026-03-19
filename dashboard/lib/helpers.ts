@@ -14,8 +14,20 @@ export function formatCompact(n: number | string | null | undefined): string {
   if (n === null || n === undefined) return '0';
   const num = typeof n === 'string' ? parseFloat(n) : n;
   if (isNaN(num)) return '0';
+  if (num >= 1_000_000_000_000) return (num / 1_000_000_000_000).toFixed(1) + 'T';
   if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(1) + 'B';
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
+  return num.toString();
+}
+
+export function formatGasUnits(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return '0';
+  const num = typeof n === 'string' ? parseFloat(n) : n;
+  if (isNaN(num)) return '0';
+  if (num >= 1_000_000_000_000) return (num / 1_000_000_000_000).toFixed(2) + 'T';
+  if (num >= 1_000_000_000) return (num / 1_000_000_000).toFixed(2) + 'B';
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + 'M';
   if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
   return num.toString();
 }
@@ -76,6 +88,15 @@ export function formatTokenValue(value: string | number, decimals: number): stri
   const fraction = raw % divisor;
   const fractionStr = fraction.toString().padStart(decimals, '0').slice(0, 2);
   return `${whole.toLocaleString('en-US')}.${fractionStr}`;
+}
+
+/**
+ * Get the full URL for API calls, respecting the basePath.
+ * Uses NEXT_PUBLIC_BASE_PATH env var set at build time.
+ */
+export function apiUrl(path: string): string {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+  return `${basePath}${path}`;
 }
 
 export function formatGwei(wei: string | number): string {

@@ -7,7 +7,7 @@ import ChartWrapper from '@/components/ChartWrapper';
 import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatNumber } from '@/lib/helpers';
+import { formatRelativeTime, formatNumber, apiUrl } from '@/lib/helpers';
 import { CONTRACT_REGISTRY, TOKEN_DECIMALS } from '@/lib/contracts';
 
 interface TokenData {
@@ -24,10 +24,10 @@ interface TokenData {
 }
 
 const TOKEN_COLORS: Record<string, string> = {
-  '0x16e43840d8d79896a389a3de85ab0b0210c05685': '#5B7FFF',  // USDC
-  '0x39b076b5d23f588690d480af3bf820edad31a4bb': '#10B981',  // USDT
-  '0xfac24134dbc4b00ee11114ecdfe6397f389203e3': '#B44AFF',  // SOL
-  '0xb0f0a14a50f14dc9e6476d61c00cf0375dd4eb04': '#FF6B35',  // WCENT
+  '0x16e43840d8d79896a389a3de85ab0b0210c05685': '#4A6CF7',  // USDC
+  '0x39b076b5d23f588690d480af3bf820edad31a4bb': '#059669',  // USDT
+  '0xfac24134dbc4b00ee11114ecdfe6397f389203e3': '#9333EA',  // SOL
+  '0xb0f0a14a50f14dc9e6476d61c00cf0375dd4eb04': '#E55A2B',  // WCENT
 };
 
 function formatTokenVal(raw: string, contractAddr: string): string {
@@ -48,7 +48,7 @@ export default function TokensPage() {
   const { data, isLoading, error } = useQuery<TokenData>({
     queryKey: ['tokens'],
     queryFn: async () => {
-      const r = await fetch('/api/incentiv/tokens');
+      const r = await fetch(apiUrl('/api/incentiv/tokens'));
       const json = await r.json();
       if (json.error) throw new Error(json.error);
       return json;
@@ -117,10 +117,10 @@ export default function TokensPage() {
           data={chartData}
           type="area"
           yKeys={[
-            { key: 'USDC', color: '#5B7FFF', name: 'USDC' },
-            { key: 'USDT', color: '#10B981', name: 'USDT' },
-            { key: 'SOL', color: '#B44AFF', name: 'SOL' },
-            { key: 'WCENT', color: '#FF6B35', name: 'WCENT' },
+            { key: 'USDC', color: '#4A6CF7', name: 'USDC' },
+            { key: 'USDT', color: '#059669', name: 'USDT' },
+            { key: 'SOL', color: '#9333EA', name: 'SOL' },
+            { key: 'WCENT', color: '#E55A2B', name: 'WCENT' },
           ]}
           loading={isLoading}
           height={300}

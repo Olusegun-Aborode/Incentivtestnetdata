@@ -1,5 +1,9 @@
 # Environment secrets
 .env
+.env.*
+.env.local
+.env.neon
+
 # Blockscout sync artifacts
 last_blockscout_block.txt
 cron_blockscout_sync.log
@@ -22,3 +26,14 @@ incentiv_data/
 *.log
 *.txt
 !requirements.txt
+
+# Logs directory
+logs/
+
+# Old/backup directories
+dashboard-old/
+
+# Node / Next.js (handled by dashboard/.gitignore too)
+node_modules/
+.next/
+.vercel/
