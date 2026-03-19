@@ -113,11 +113,12 @@ export async function GET() {
         CACHE_TTLS.DAILY_SERIES
       ),
 
-      queryOne<{ avg_block_time: string; avg_txs_per_block: string; total_gas: string }>(
+      queryOne<{ avg_block_time: string; avg_txs_per_block: string; total_gas: string; avg_gas_per_block: string }>(
         `SELECT
           EXTRACT(EPOCH FROM (MAX("timestamp"::timestamp) - MIN("timestamp"::timestamp))) / NULLIF(COUNT(*) - 1, 0) as avg_block_time,
           AVG(transaction_count) as avg_txs_per_block,
-          SUM(gas_used)::text as total_gas
+          SUM(gas_used)::text as total_gas,
+          AVG(gas_used)::bigint::text as avg_gas_per_block
         FROM blocks
         WHERE "timestamp"::timestamp > NOW() - INTERVAL '7 days'`,
         [],
@@ -159,6 +160,7 @@ export async function GET() {
         avgBlockTime: networkStats?.avg_block_time ? parseFloat(networkStats.avg_block_time).toFixed(2) : '0',
         avgTxsPerBlock: networkStats?.avg_txs_per_block ? parseFloat(networkStats.avg_txs_per_block).toFixed(1) : '0',
         totalGas: networkStats?.total_gas || '0',
+        avgGasPerBlock: networkStats?.avg_gas_per_block || '0',
       },
     });
   } catch (error) {

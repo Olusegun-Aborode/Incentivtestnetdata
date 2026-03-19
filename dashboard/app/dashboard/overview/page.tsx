@@ -22,6 +22,7 @@ interface OverviewData {
     avgBlockTime: string;
     avgTxsPerBlock: string;
     totalGas: string;
+    avgGasPerBlock: string;
   };
 }
 
@@ -139,9 +140,9 @@ export default function OverviewPage() {
               </div>
             </div>
             <div>
-              <div className="metric-label">Total Gas Consumed (7d)</div>
+              <div className="metric-label">Avg Gas / Block (7d)</div>
               <div className="metric-value text-accent-purple mt-1">
-                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : formatGasUnits(data?.networkStats.totalGas)}
+                {isLoading ? <span className="skeleton inline-block h-6 w-24" /> : formatGasUnits(data?.networkStats.avgGasPerBlock)}
               </div>
             </div>
           </div>

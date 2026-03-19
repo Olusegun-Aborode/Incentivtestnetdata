@@ -8,7 +8,7 @@ import ChartWrapper from '@/components/ChartWrapper';
 import DataTable from '@/components/DataTable';
 import AddressLink from '@/components/AddressLink';
 import TxLink from '@/components/TxLink';
-import { formatRelativeTime, formatNumber, formatCompact, formatEther, apiUrl } from '@/lib/helpers';
+import { formatRelativeTime, formatNumber, formatCompact, apiUrl } from '@/lib/helpers';
 
 interface AAData {
   metrics: {
@@ -72,7 +72,7 @@ export default function AccountAbstractionPage() {
         />
         <MetricCard
           label="Total Gas Cost"
-          value={data ? formatCompact(parseFloat(data.metrics.totalGasCost) / 1e18) + ' ETH' : '-'}
+          value={data ? formatCompact(parseFloat(data.metrics.totalGasCost) / 1e18) + ' CENT' : '-'}
           accent="blue"
           loading={isLoading}
         />
@@ -137,10 +137,10 @@ export default function AccountAbstractionPage() {
                   </span>
                 );
               }},
-              { key: 'gas_cost', header: 'Gas', align: 'right', render: (r) => {
+              { key: 'gas_cost', header: 'Gas Cost', align: 'right', render: (r) => {
                 const row = r as Record<string, unknown>;
                 const cost = parseFloat(row.gas_cost as string || '0');
-                return <span className="text-xs">{cost > 0 ? formatEther(cost) : '-'}</span>;
+                return <span className="text-xs">{cost > 0 ? (cost / 1e18).toFixed(2) + ' CENT' : '-'}</span>;
               }},
               { key: 'transaction_hash', header: 'Tx', render: (r) => {
                 const row = r as Record<string, unknown>;

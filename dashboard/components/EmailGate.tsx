@@ -70,7 +70,7 @@ export default function EmailGate({ children }: { children: React.ReactNode }) {
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <img
-                src="/branding/icon.png"
+                src={apiUrl('/branding/icon.png')}
                 alt="Datum Labs"
                 className="w-5 h-5"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}

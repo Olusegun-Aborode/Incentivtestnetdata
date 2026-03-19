@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import DataFreshness from '@/components/DataFreshness';
 import EmailGate from '@/components/EmailGate';
+import { apiUrl } from '@/lib/helpers';
 
 const NAV_ITEMS = [
   { href: '/dashboard/overview', label: 'Overview' },
@@ -28,7 +29,7 @@ export default function DashboardLayout({
         {/* Top Navigation Bar */}
         <header className="h-12 border-b bg-card flex items-center px-4 sticky top-0 z-40 shadow-sm">
           <div className="flex items-center gap-3 mr-8">
-            <img src="/branding/icon.png" alt="Datum Labs" className="w-6 h-6" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            <img src={apiUrl('/branding/icon.png')} alt="Datum Labs" className="w-6 h-6" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
             <span className="text-accent-orange font-bold text-sm tracking-wider uppercase">Datum Labs</span>
             <span className="text-text-muted text-[10px] tracking-widest uppercase ml-1">Incentiv Explorer</span>
           </div>
